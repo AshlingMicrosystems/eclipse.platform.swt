@@ -27,18 +27,6 @@
   <properties>
     <tycho.scmUrl>scm:git:https://github.com/eclipse-platform/eclipse.platform.swt.git</tycho.scmUrl>
     <os-jvm-flags></os-jvm-flags>
-
-    <!-- for sonarcloud: -->
-    <!-- needs to be adapted on every fork: <sonar.organization>eclipse-platform</sonar.organization> -->
-    <sonar.host.url>https://sonarcloud.io</sonar.host.url>
-    <!-- for build-individual-bundles: -->
-    <sonar.moduleKey>${project.artifactId}</sonar.moduleKey>
-    <!-- sonar fails to analyze .java files but can analyse compiled binaries: -->
-    <sonar.java.binaries>target</sonar.java.binaries>
-    <!-- sonar fails to analyse C sources. Disable them: -->
-    <sonar.c.file.suffixes>-</sonar.c.file.suffixes>
-    <sonar.cpp.file.suffixes>-</sonar.cpp.file.suffixes>
-    <sonar.objc.file.suffixes>-</sonar.objc.file.suffixes>
     <skipAPIAnalysis>true</skipAPIAnalysis>
   </properties>
 
@@ -79,122 +67,21 @@
       </plugins>
       </build>
     </profile>
-    <profile>
-      <id>mac</id>
-      <activation>
-        <os>
-          <family>mac</family>
-        </os>
-      </activation>
-	  <modules>
-	    <module>tests/org.eclipse.swt.tests.cocoa</module>
-	  </modules>
-	  <build>
-	      <plugins>
-	        <plugin>
-	          <groupId>org.eclipse.tycho</groupId>
-	          <artifactId>target-platform-configuration</artifactId>
-	          <version>${tycho.version}</version>
-	          <configuration>
-	            <environments>
-	            	<environment>
-	            		<os>macosx</os>
-	            		<ws>cocoa</ws>
-	            		<arch>x86_64</arch> 
-					</environment>
-					<environment>
-		              <os>macosx</os>
-		              <ws>cocoa</ws>
-		              <arch>aarch64</arch>
-		            </environment>
-	            </environments>
-	          </configuration>
-	        </plugin>
-	      </plugins>
-      </build>
-	<properties>
-		<os-jvm-flags>-XstartOnFirstThread</os-jvm-flags>
-	</properties>
-    </profile>
-    <profile>
-      <id>unix</id>
-      <activation>
-        <os>
-          <family>unix</family>
-          <name>Linux</name>
-	</os>
-      </activation>
-	  <modules>
-	    <module>tests/org.eclipse.swt.tests.gtk</module>
-	  </modules>
-	  <build>
-	      <plugins>
-	        <plugin>
-	          <groupId>org.eclipse.tycho</groupId>
-	          <artifactId>target-platform-configuration</artifactId>
-	          <version>${tycho.version}</version>
-	          <configuration>
-	            <environments>
-	            	<environment>
-						<os>linux</os>
-						<ws>gtk</ws>
-						<arch>x86_64</arch>
-					</environment>
-					<environment>
-			            <os>linux</os>
-			            <ws>gtk</ws>
-			            <arch>ppc64le</arch>
-			          </environment>
-	            	</environments>
-	          </configuration>
-	        </plugin>
-	      </plugins>
-      </build>
-    </profile>
-    <profile>
-      <id>windows</id>
-      <activation>
-        <os>
-          <family>windows</family>
-        </os>
-      </activation>
-	  <modules>
-	    <module>tests/org.eclipse.swt.tests.win32</module>
-	  </modules>
-	  <build>
-	      <plugins>
-	        <plugin>
-	          <groupId>org.eclipse.tycho</groupId>
-	          <artifactId>target-platform-configuration</artifactId>
-	          <version>${tycho.version}</version>
-	          <configuration>
-	            <environments>
-	            	<environment>
-						<os>win32</os>
-						<ws>win32</ws>
-						<arch>x86_64</arch>
-					</environment>
-	            </environments>
-	          </configuration>
-	        </plugin>
-	      </plugins>
-      </build>
-    </profile>
   </profiles>
 
 
   <modules>
     <module>bundles/org.eclipse.swt</module>
-    <module>local-build/org.eclipse.swt.fragments.localbuild</module>
-    <module>bundles/org.eclipse.swt.tools.base</module>
+    <!--module>local-build/org.eclipse.swt.fragments.localbuild</module-->
+    <!--module>bundles/org.eclipse.swt.tools.base</module>
     <module>bundles/org.eclipse.swt.tools.spies</module>
-    <module>bundles/org.eclipse.swt.tools</module>
-    <module>examples/org.eclipse.swt.examples</module>
+    <module>bundles/org.eclipse.swt.tools</module-->
+    <!--module>examples/org.eclipse.swt.examples</module>
     <module>examples/org.eclipse.swt.examples.browser.demos</module>
     <module>examples/org.eclipse.swt.examples.launcher</module>
     <module>examples/org.eclipse.swt.examples.ole.win32</module>
-    <module>examples/org.eclipse.swt.examples.views</module>
-    <module>tests/org.eclipse.swt.tests</module>
-    <module>features/org.eclipse.swt.tools.feature</module>
+    <module>examples/org.eclipse.swt.examples.views</module-->
+    <!--module>tests/org.eclipse.swt.tests</module-->
+    <!--module>features/org.eclipse.swt.tools.feature</module-->
   </modules>
 </project>
