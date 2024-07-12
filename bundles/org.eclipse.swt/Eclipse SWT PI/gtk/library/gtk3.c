@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corporation and others.
+ * Copyright (c) 2000, 2023 IBM Corporation and others.
  *
  * This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License 2.0
@@ -22,11 +22,6 @@
 
 #ifndef GTK3_NATIVE
 #define GTK3_NATIVE(func) Java_org_eclipse_swt_internal_gtk3_GTK3_##func
-#endif
-
-#ifdef _WIN32
-  /* Many methods don't use their 'env' and 'that' arguments */
-  #pragma warning (disable: 4100)
 #endif
 
 #ifndef NO_GTK_1IS_1MENU_1ITEM
@@ -1255,6 +1250,18 @@ JNIEXPORT void JNICALL GTK3_NATIVE(gtk_1menu_1popdown)
 	gtk_menu_popdown((GtkMenu *)arg0);
 	GTK3_NATIVE_EXIT(env, that, gtk_1menu_1popdown_FUNC);
 }
+#endif
+
+#ifndef NO_gtk_1menu_1popup
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+JNIEXPORT void JNICALL GTK3_NATIVE(gtk_1menu_1popup)
+	(JNIEnv *env, jclass that, jlong arg0, jlong arg1, jlong arg2, jlong arg3, jlong arg4, jint arg5, jint arg6)
+{
+	GTK3_NATIVE_ENTER(env, that, gtk_1menu_1popup_FUNC);
+	gtk_menu_popup((GtkMenu *)arg0, (GtkWidget *)arg1, (GtkWidget *)arg2, (GtkMenuPositionFunc)arg3, (gpointer)arg4, (guint)arg5, (guint32)arg6);
+	GTK3_NATIVE_EXIT(env, that, gtk_1menu_1popup_FUNC);
+}
+G_GNUC_END_IGNORE_DEPRECATIONS
 #endif
 
 #ifndef NO_gtk_1menu_1popup_1at_1pointer
