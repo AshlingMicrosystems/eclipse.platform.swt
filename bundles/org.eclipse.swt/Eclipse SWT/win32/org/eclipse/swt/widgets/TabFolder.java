@@ -298,7 +298,7 @@ void drawThemeBackground (long hDC, long hwnd, RECT rect) {
 	OS.GetClientRect (handle, rect2);
 	OS.MapWindowPoints (handle, hwnd, rect2, 2);
 	if (OS.IntersectRect (new RECT (), rect2, rect)) {
-		OS.DrawThemeBackground (display.hTabTheme (), hDC, OS.TABP_BODY, 0, rect2, null);
+		OS.DrawThemeBackground (display.hTabTheme(nativeZoom), hDC, OS.TABP_BODY, 0, rect2, null);
 	}
 }
 
@@ -455,10 +455,10 @@ int imageIndex (Image image) {
 	 */
 	if (image == null) return -1;
 	if (imageList == null) {
-		Rectangle bounds = DPIUtil.autoScaleBounds(image.getBounds(), this.getZoom(), 100);
-		imageList = display.getImageList (style & SWT.RIGHT_TO_LEFT, bounds.width, bounds.height);
+		Rectangle bounds = DPIUtil.scaleBounds(image.getBounds(), this.getZoom(), 100);
+		imageList = display.getImageList (style & SWT.RIGHT_TO_LEFT, bounds.width, bounds.height, this.getZoom());
 		int index = imageList.add (image);
-		long hImageList = imageList.getHandle ();
+		long hImageList = imageList.getHandle(getZoom());
 		OS.SendMessage (handle, OS.TCM_SETIMAGELIST, 0, hImageList);
 		return index;
 	}
@@ -508,8 +508,9 @@ Point minimumSize (int wHint, int hHint, boolean flushCache) {
 			if (items [index].control == child) break;
 			index++;
 		}
+		int zoom = getZoom();
 		if (index == count) {
-			Rectangle rect = DPIUtil.autoScaleUp(child.getBounds ());
+			Rectangle rect = DPIUtil.scaleUp(child.getBounds (), zoom);
 			width = Math.max (width, rect.x + rect.width);
 			height = Math.max (height, rect.y + rect.height);
 		} else {
@@ -517,7 +518,7 @@ Point minimumSize (int wHint, int hHint, boolean flushCache) {
 			 * Since computeSize can be overridden by subclasses, we cannot
 			 * call computeSizeInPixels directly.
 			 */
-			Point size = DPIUtil.autoScaleUp(child.computeSize (DPIUtil.autoScaleDown(wHint), DPIUtil.autoScaleDown(hHint), flushCache));
+			Point size = DPIUtil.scaleUp(child.computeSize (DPIUtil.scaleDown(wHint, zoom), DPIUtil.scaleDown(hHint, zoom), flushCache), zoom);
 			width = Math.max (width, size.x);
 			height = Math.max (height, size.y);
 		}
@@ -838,8 +839,8 @@ void updateOrientation () {
 	if (imageList != null) {
 		Point size = imageList.getImageSize ();
 		display.releaseImageList (imageList);
-		imageList = display.getImageList (style & SWT.RIGHT_TO_LEFT, size.x, size.y);
-		long hImageList = imageList.getHandle ();
+		imageList = display.getImageList (style & SWT.RIGHT_TO_LEFT, size.x, size.y, this.getZoom());
+		long hImageList = imageList.getHandle(getZoom());
 		OS.SendMessage (handle, OS.TCM_SETIMAGELIST, 0, hImageList);
 		TCITEM tcItem = new TCITEM ();
 		tcItem.mask = OS.TCIF_IMAGE;

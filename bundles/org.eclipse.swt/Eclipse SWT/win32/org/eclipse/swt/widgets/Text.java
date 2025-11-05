@@ -337,24 +337,7 @@ void createHandle () {
 			state |= THEME_BACKGROUND;
 		}
 	}
-	addIcons();
-}
-
-private void addIcons() {
 	if ((style & SWT.SEARCH) != 0) {
-		if (display.hIconSearch == 0) {
-			long [] phicon = new long [1];
-
-			int searchIconResource = display.textUseDarkthemeIcons ? IDI_SEARCH_DARKTHEME : IDI_SEARCH;
-			int hresult = OS.LoadIconMetric (OS.GetLibraryHandle (), searchIconResource, OS.LIM_SMALL, phicon);
-			if (hresult != OS.S_OK) error (SWT.ERROR_NO_HANDLES);
-			display.hIconSearch = phicon [0];
-
-			int cancelIconResource = display.textUseDarkthemeIcons ? IDI_CANCEL_DARKTHEME : IDI_CANCEL;
-			hresult = OS.LoadIconMetric (OS.GetLibraryHandle (), cancelIconResource, OS.LIM_SMALL, phicon);
-			if (hresult != OS.S_OK) error (SWT.ERROR_NO_HANDLES);
-			display.hIconCancel = phicon [0];
-		}
 		if ((style & SWT.ICON_SEARCH) != 0) {
 			long hwndSearch = OS.CreateWindowEx (
 				0,
@@ -789,8 +772,8 @@ public void clearSelection () {
 
 		// When WS_BORDER is used instead of WS_EX_CLIENTEDGE, compensate the size difference
 		if (isUseWsBorder ()) {
-			int dx = OS.GetSystemMetrics (OS.SM_CXEDGE) - OS.GetSystemMetrics (OS.SM_CXBORDER);
-			int dy = OS.GetSystemMetrics (OS.SM_CYEDGE) - OS.GetSystemMetrics (OS.SM_CYBORDER);
+			int dx = getSystemMetrics (OS.SM_CXEDGE) - getSystemMetrics (OS.SM_CXBORDER);
+			int dy = getSystemMetrics (OS.SM_CYEDGE) - getSystemMetrics (OS.SM_CYBORDER);
 			rect.x -= dx;
 			rect.y -= dy;
 			rect.width += 2*dx;
@@ -969,15 +952,6 @@ void fixAlignment () {
 
 @Override int getBorderWidthInPixels () {
 	checkWidget ();
-	/*
-	* Feature in Windows 2000 and XP.  Despite the fact that WS_BORDER
-	* is set when the edit control is created, the style bit is cleared.
-	* The fix is to avoid the check for WS_BORDER and use the SWT widget
-	* style bits instead.
-	*/
-//	if ((style & SWT.BORDER) != 0 && (style & SWT.FLAT) != 0) {
-//		return OS.GetSystemMetrics (OS.SM_CXBORDER);
-//	}
 	return super.getBorderWidthInPixels ();
 }
 
@@ -1012,7 +986,7 @@ public int getCaretLineNumber () {
  */
 public Point getCaretLocation () {
 	checkWidget ();
-	return DPIUtil.autoScaleDown(getCaretLocationInPixels());
+	return DPIUtil.scaleDown(getCaretLocationInPixels(), getZoom());
 }
 
 Point getCaretLocationInPixels () {
@@ -1237,7 +1211,7 @@ public String getLineDelimiter () {
  */
 public int getLineHeight () {
 	checkWidget ();
-	return DPIUtil.autoScaleDown(getLineHeightInPixels ());
+	return DPIUtil.scaleDown(getLineHeightInPixels (), getZoom());
 }
 
 int getLineHeightInPixels () {
@@ -1580,7 +1554,7 @@ public int getTopIndex () {
  */
 public int getTopPixel () {
 	checkWidget ();
-	return DPIUtil.autoScaleDown(getTopPixelInPixels());
+	return DPIUtil.scaleDown(getTopPixelInPixels(), getZoom());
 }
 
 int getTopPixelInPixels () {
@@ -2095,7 +2069,7 @@ void setMargins () {
 		if ((style & SWT.ICON_SEARCH) != 0) flags |= fLeading;
 		if ((style & SWT.ICON_CANCEL) != 0) flags |= fTrailing;
 		if (flags != 0) {
-			int iconWidth = OS.GetSystemMetrics (OS.SM_CXSMICON);
+			int iconWidth = getSystemMetrics (OS.SM_CXSMICON);
 			OS.SendMessage (handle, OS.EM_SETMARGINS, flags, OS.MAKELPARAM(iconWidth, iconWidth));
 		}
 	}
@@ -2513,8 +2487,9 @@ int untranslateOffset (int offset) {
 
 @Override
 void updateMenuLocation (Event event) {
-	Point point = display.mapInPixels (this, null, getCaretLocationInPixels ());
-	event.setLocationInPixels(point.x, point.y + getLineHeightInPixels ());
+	Point pointInPixels = display.mapInPixels (this, null, getCaretLocationInPixels ());
+	int zoom = getZoom();
+	event.setLocation(DPIUtil.scaleDown(pointInPixels.x, zoom), DPIUtil.scaleDown(pointInPixels.y + getLineHeightInPixels (), zoom));
 }
 
 @Override
@@ -2776,9 +2751,12 @@ LRESULT WM_DRAWITEM (long wParam, long lParam) {
 	drawBackground (struct.hDC, rect, -1, pt.x, pt.y);
 	if (struct.CtlID == SWT.ICON_CANCEL && struct.hwndItem == hwndActiveIcon && OS.IsAppThemed()) {
 		int state = OS.GetKeyState (OS.VK_LBUTTON) < 0 ? OS.PBS_PRESSED : OS.PBS_HOT;
-		OS.DrawThemeBackground (display.hButtonThemeAuto (), struct.hDC, OS.BP_PUSHBUTTON, state, rect, null);
+		OS.DrawThemeBackground(display.hButtonThemeAuto(nativeZoom), struct.hDC, OS.BP_PUSHBUTTON, state, rect, null);
 	}
-	long hIcon = (struct.CtlID == SWT.ICON_SEARCH) ? display.hIconSearch : display.hIconCancel;
+	int width = rect.right - rect.left;
+	int height = rect.bottom - rect.top;
+	int size = Math.min(width, height);
+	long hIcon = (struct.CtlID == SWT.ICON_SEARCH) ? display.getTextSearchIcon(size) : display.getTextCancelIcon(size);
 	int y = (rect.bottom - rect.right) / 2;
 	OS.DrawIconEx (struct.hDC, 0, y, hIcon, 0, 0, 0, 0, OS.DI_NORMAL);
 	return LRESULT.ONE;
@@ -2958,7 +2936,7 @@ LRESULT WM_SIZE(long wParam, long lParam) {
 		long hwndTrailing = OS.GetDlgItem (handle, rtl ? SWT.ICON_SEARCH : SWT.ICON_CANCEL);
 		int width = OS.LOWORD (lParam);
 		int height = OS.HIWORD (lParam);
-		int iconWidth = OS.GetSystemMetrics (OS.SM_CXSMICON);
+		int iconWidth = getSystemMetrics (OS.SM_CXSMICON);
 		int flags = OS.SWP_NOZORDER | OS.SWP_NOACTIVATE | OS.SWP_NOCOPYBITS;
 		if (hwndLeading != 0) OS.SetWindowPos (hwndLeading, 0, 0, 0, iconWidth, height, flags);
 		if (hwndTrailing != 0) OS.SetWindowPos (hwndTrailing, 0, width - iconWidth, 0, iconWidth, height, flags);
@@ -3175,7 +3153,6 @@ private static void handleDPIChange(Widget widget, int newZoom, float scalingFac
 	if (!(widget instanceof Text text)) {
 		return;
 	}
-	text.addIcons();
 	text.setMargins();
 }
 }

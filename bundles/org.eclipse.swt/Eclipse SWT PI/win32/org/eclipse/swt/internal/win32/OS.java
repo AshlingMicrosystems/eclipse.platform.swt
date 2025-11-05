@@ -19,6 +19,7 @@ import java.util.*;
 
 import org.eclipse.swt.graphics.*;
 import org.eclipse.swt.internal.*;
+import org.eclipse.swt.internal.win32.version.*;
 import org.eclipse.swt.widgets.*;
 
 public class OS extends C {
@@ -30,19 +31,6 @@ public class OS extends C {
 	* SWT Windows flags
 	*/
 	public static final boolean IsDBLocale;
-	/**
-	 * Always reports the correct build number, regardless of manifest and
-	 * compatibility GUIDs. Note that build number alone is sufficient to
-	 * identify Windows version.
-	 */
-	public static final int WIN32_BUILD;
-	/**
-	 * Values taken from https://en.wikipedia.org/wiki/List_of_Microsoft_Windows_versions
-	 */
-	public static final int WIN32_BUILD_WIN10_1607 = 14393; // "Windows 10 August 2016 Update"
-	public static final int WIN32_BUILD_WIN10_1809 = 17763; // "Windows 10 October 2018 Update"
-	public static final int WIN32_BUILD_WIN10_2004 = 19041; // "Windows 10 May 2020 Update"
-	public static final int WIN32_BUILD_WIN11_21H2 = 22000; // Initial Windows 11 release
 
 	public static final String NO_MANIFEST = "org.eclipse.swt.internal.win32.OS.NO_MANIFEST";
 
@@ -54,20 +42,6 @@ public class OS extends C {
 	public static final int SM_IMMENABLED = 0x52;
 
 	static {
-		/*
-		 * Starting with Windows 10, GetVersionEx() lies about version unless
-		 * application manifest has a proper entry. RtlGetVersion() always
-		 * reports true version.
-		 */
-		OSVERSIONINFOEX osVersionInfoEx = new OSVERSIONINFOEX ();
-		osVersionInfoEx.dwOSVersionInfoSize = OSVERSIONINFOEX.sizeof;
-		if (0 == OS.RtlGetVersion (osVersionInfoEx)) {
-			WIN32_BUILD = osVersionInfoEx.dwBuildNumber;
-		} else {
-			System.err.println ("SWT: OS: Failed to detect Windows build number");
-			WIN32_BUILD = 0;
-		}
-
 		/* Load the manifest to force the XP Theme */
 		if (System.getProperty (NO_MANIFEST) == null) {
 			ACTCTX pActCtx = new ACTCTX ();
@@ -369,6 +343,11 @@ public class OS extends C {
 	public static final short DMDUP_SIMPLEX = 1;
 	public static final short DMDUP_VERTICAL = 2;
 	public static final short DMDUP_HORIZONTAL = 3;
+	public static final int DPI_AWARENESS_CONTEXT_UNAWARE = 24592;
+	public static final int DPI_AWARENESS_CONTEXT_UNAWARE_GDISCALED = 1073766416;
+	public static final int DPI_AWARENESS_CONTEXT_SYSTEM_AWARE = 24593;
+	public static final int DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE = 18;
+	public static final int DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = 34;
 	public static final int DSTINVERT = 0x550009;
 	public static final int DT_BOTTOM = 0x8;
 	public static final int DT_CALCRECT = 0x400;
@@ -452,6 +431,7 @@ public class OS extends C {
 	public static final int EN_CHANGE = 0x300;
 	public static final int EP_EDITTEXT = 1;
 	public static final int ERROR_FILE_NOT_FOUND = 0x2;
+	public static final int ERROR_INVALID_STATE = 0x139F;
 	public static final int ERROR_NO_MORE_ITEMS = 0x103;
 	public static final int ERROR_CANCELED = 0x4C7;
 	public static final int ESB_DISABLE_BOTH = 0x3;
@@ -497,6 +477,9 @@ public class OS extends C {
 	public static final int FR_PRIVATE = 0x10;
 	public static final int FSHIFT = 0x4;
 	public static final int FVIRTKEY = 0x1;
+	public static final int GA_PARENT = 0x1;
+	public static final int GA_ROOT = 0x2;
+	public static final int GA_ROOTOWNER = 0x3;
 	public static final int GCP_REORDER = 0x0002;
 	public static final int GCP_GLYPHSHAPE = 0x0010;
 	public static final int GCP_CLASSIN = 0x00080000;
@@ -890,6 +873,7 @@ public class OS extends C {
 	public static final int MFS_CHECKED = 0x8;
 	public static final int MFS_DISABLED = 0x3;
 	public static final int MFS_GRAYED = 0x3;
+	public static final int MFT_OWNERDRAW = 0x100;
 	public static final int MFT_RADIOCHECK = 0x200;
 	public static final int MFT_RIGHTJUSTIFY = 0x4000;
 	public static final int MFT_RIGHTORDER = 0x2000;
@@ -1012,6 +996,8 @@ public class OS extends C {
 	public static final int OBJ_PEN = 0x1;
 	public static final int OBM_CHECKBOXES = 0x7ff7;
 	public static final int ODS_SELECTED = 0x1;
+	public static final int ODS_NOACCEL = 0x0100;
+	public static final int ODS_INACTIVE = 0x80;
 	public static final int ODT_MENU = 0x1;
 	public static final int OIC_BANG = 0x7F03;
 	public static final int OIC_HAND = 0x7F01;
@@ -1057,6 +1043,7 @@ public class OS extends C {
 	public static final int PLANES = 0xe;
 	public static final int PM_NOREMOVE = 0x0;
 	public static final int PM_NOYIELD = 0x2;
+	public static final int PW_RENDERFULLCONTENT = 0x2; // undocumented ( >= Windows 8.1)
 	public static final int QS_HOTKEY = 0x0080;
 	public static final int QS_KEY = 0x0001;
 	public static final int QS_MOUSEMOVE = 0x0002;
@@ -1198,6 +1185,7 @@ public class OS extends C {
 	public static final int SHADEBLENDCAPS = 120;
 	public static final int SHGFI_ICON = 0x000000100;
 	public static final int SHGFI_SMALLICON= 0x1;
+	public static final int SHGFI_LARGEICON= 0x0;
 	public static final int SHGFI_USEFILEATTRIBUTES = 0x000000010;
 	public static final int SIGDN_FILESYSPATH = 0x80058000;
 	public static final int SIF_ALL = 0x17;
@@ -1233,6 +1221,7 @@ public class OS extends C {
 	public static final int SM_CYFOCUSBORDER = 84;
 	public static final int SM_CYHSCROLL = 0x3;
 	public static final int SM_CYMENU = 0xf;
+	public static final int SM_CYMENUCHECK = 72;
 	public static final int SM_CXMINTRACK = 34;
 	public static final int SM_CYMINTRACK = 35;
 	public static final int SM_CXMAXTRACK = 59;
@@ -1355,6 +1344,7 @@ public class OS extends C {
 	public static final int TBS_DOWNISLEFT = 0x0400;
 	public static final int TBS_HORZ = 0x0;
 	public static final int TBS_VERT = 0x2;
+	public static final int TB_ADDBUTTONS = 0x444;
 	public static final int TB_ADDSTRING = 0x44d;
 	public static final int TB_AUTOSIZE = 0x421;
 	public static final int TB_BUTTONCOUNT = 0x418;
@@ -1740,6 +1730,7 @@ public class OS extends C {
 	public static final int WM_DEADCHAR = 0x103;
 	public static final int WM_DESTROY = 0x2;
 	public static final int WM_DPICHANGED = 0x02E0;
+	public static final int WM_DISPLAYCHANGE = 0x7E;
 	public static final int WM_DRAWITEM = 0x2b;
 	public static final int WM_ENDSESSION = 0x16;
 	public static final int WM_ENTERIDLE = 0x121;
@@ -1958,7 +1949,6 @@ public static final native int NONCLIENTMETRICS_sizeof ();
 /** @method flags=const */
 public static final native int NOTIFYICONDATA_V2_SIZE ();
 public static final native int OUTLINETEXTMETRIC_sizeof ();
-public static final native int OSVERSIONINFOEX_sizeof ();
 public static final native int PAINTSTRUCT_sizeof ();
 public static final native int POINT_sizeof ();
 public static final native int PRINTDLG_sizeof ();
@@ -2277,11 +2267,17 @@ public static final void setTheme(boolean isDarkTheme) {
 	display.setData("org.eclipse.swt.internal.win32.Combo.useDarkTheme",       isDarkTheme);
 	display.setData("org.eclipse.swt.internal.win32.ProgressBar.useColors",    isDarkTheme);
 	display.setData("org.eclipse.swt.internal.win32.Text.useDarkThemeIcons",   isDarkTheme);
+	display.setData("org.eclipse.swt.internal.win32.Edge.useDarkPreferedColorScheme", isDarkTheme);
 }
 
 public static final boolean SetWindowText (long hWnd, TCHAR lpString) {
 	char [] lpString1 = lpString == null ? null : lpString.chars;
 	return SetWindowText (hWnd, lpString1);
+}
+
+public static final int SHDefExtractIcon (TCHAR lpszFile, int iIndex, int uFlags, long [] phiconLarge, long [] phiconSmall, int nIconSize) {
+	char [] lpszFile1 = lpszFile == null ? null : lpszFile.chars;
+	return SHDefExtractIcon (lpszFile1, iIndex, uFlags, phiconLarge, phiconSmall, nIconSize);
 }
 
 public static final boolean UnregisterClass (TCHAR lpClassName, long hInstance) {
@@ -2329,7 +2325,7 @@ public static final native long ActivateKeyboardLayout(long hkl, int Flags);
  * @param pdv cast=(PVOID)
  */
 public static final native int AddFontResourceEx(char[] lpszFilename, int fl, long pdv);
-public static final native boolean AdjustWindowRectEx (RECT lpRect, int dwStyle, boolean bMenu, int dwExStyle);
+public static final native boolean AdjustWindowRectExForDpi (RECT lpRect, int dwStyle, boolean bMenu, int dwExStyle, int dpi);
 /** @method flags=no_gen */
 public static final native boolean AllowDarkModeForWindow(long hWnd, boolean allow);
 public static final native boolean AllowSetForegroundWindow (int dwProcessId);
@@ -2709,6 +2705,8 @@ public static final native int FillRect (long hDC, RECT lprc, long hbr);
 public static final native int GdiSetBatchLimit (int dwLimit);
 public static final native int GetACP ();
 public static final native long GetActiveWindow ();
+/** @param hWnd cast=(HWND) */
+public static final native long GetAncestor (long hWnd, int gaFlags);
 /** @param hDC cast=(HDC) */
 public static final native int GetBkColor (long hDC);
 public static final native long GetCapture ();
@@ -2792,6 +2790,8 @@ public static final native long GetDlgItem (long hDlg, int nIDDlgItem);
 public static final native int GetDoubleClickTime ();
 /** @method flags=dynamic */
 public static final native int GetDpiForMonitor (long hmonitor, int dpiType, int [] dpiX, int [] dpiY);
+/** @method flags=dynamic */
+public static final native int GetDpiForWindow (long hWnd);
 public static final native long GetFocus ();
 /** @param hdc cast=(HDC) */
 public static final native int GetFontLanguageInfo (long hdc);
@@ -3278,6 +3278,12 @@ public static final native int LoadIconMetric (long hinst, long pszName, int lim
  */
 public static final native long LoadImage (long hinst, long lpszName, int uType, int cxDesired, int cyDesired, int fuLoad);
 /**
+ * @param hinst cast=(HINSTANCE)
+ * @param lpszName cast=(LPWSTR)
+ * @param phico cast=(HICON *)
+ */
+public static final native long LoadIconWithScaleDown (long hinst, long lpszName, int cxDesired, int cyDesired, long [] phico);
+/**
  * @param pwszKLID cast=(LPCWSTR)
  * @param Flags cast=(UINT)
  */
@@ -3312,6 +3318,8 @@ public static final native int MessageBox (long hWnd, char [] lpText, char [] lp
 public static final native boolean ModifyWorldTransform(long hdc, float [] lpXform, int iMode);
 /** @param hwnd cast=(HWND) */
 public static final native long MonitorFromWindow (long hwnd, int dwFlags);
+/** @param lprc flags=no_out */
+public static final native long MonitorFromRect(RECT lprc, int dwFlags);
 /**
  * @param Destination cast=(PVOID),flags=no_in critical
  * @param SourcePtr cast=(CONST VOID *)
@@ -3767,6 +3775,12 @@ public static final native boolean OpenClipboard (long hWndNewOwner);
  * @param pszClassList cast=(LPCWSTR),flags=no_out
  */
 public static final native long OpenThemeData (long hwnd, char[] pszClassList);
+/**
+ * @method flags=dynamic
+ * @param hwnd cast=(HWND)
+ * @param pszClassList cast=(LPCWSTR),flags=no_out
+ */
+public static final native long OpenThemeDataForDpi (long hwnd, char[] pszClassList, int dpi);
 /** @param hdc cast=(HDC) */
 public static final native boolean PatBlt (long hdc, int x1, int x2, int w, int h, int rop);
 /** @param szfile cast=(LPCWSTR) */
@@ -3924,8 +3938,6 @@ public static final native boolean ReplyMessage (long lResult);
 public static final native boolean RestoreDC (long hdc, int nSavedDC);
 /** @param hdc cast=(HDC) */
 public static final native boolean RoundRect (long hdc, int nLeftRect, int nTopRect, int nRightRect, int nBottomRect, int nWidth, int nHeight);
-/** @method flags=dynamic */
-public static final native int RtlGetVersion (OSVERSIONINFOEX lpVersionInformation);
 /** @param hdc cast=(HDC) */
 public static final native int SaveDC (long hdc);
 /** @param hWnd cast=(HWND) */
@@ -4333,6 +4345,13 @@ public static final native int SetPixel (long hdc, int X, int Y, int crColor);
 /** @param hdc cast=(HDC) */
 public static final native int SetPolyFillMode (long hdc, int iPolyFillMode);
 public static final native boolean SetProcessDPIAware ();
+/**
+ * @method flags=dynamic
+ * @param dpiContext cast=(DPI_AWARENESS_CONTEXT)
+ */
+public static final native long SetThreadDpiAwarenessContext (long dpiContext);
+/** @method flags=dynamic */
+public static final native long GetThreadDpiAwarenessContext ();
 /** @method flags=no_gen */
 public static final native int SetPreferredAppMode(int mode);
 /** @param lprc flags=no_in */
@@ -4409,6 +4428,12 @@ public static final native long SetWindowsHookEx (int idHook, long lpfn,  long h
  * @param lpXform cast=(XFORM *),flags=no_out
  */
 public static final native boolean SetWorldTransform(long hdc, float[] lpXform);
+/**
+ * @param lpszFile cast=(LPWSTR)
+ * @param phiconLarge cast=(HICON FAR *)
+ * @param phiconSmall cast=(HICON FAR *)
+ */
+public static final native int SHDefExtractIcon (char [] lpszFile, int iIndex, int uFlags, long [] phiconLarge, long [] phiconSmall, int nIconSize);
 /** @param pszPath cast=(LPCWSTR),flags=no_out */
 public static final native long SHGetFileInfo (char [] pszPath, int dwFileAttributes, SHFILEINFO psfi, int cbFileInfo, int uFlags);
 public static final native boolean ShellExecuteEx (SHELLEXECUTEINFO lpExecInfo);
@@ -4561,4 +4586,12 @@ public static final native long GetCurrentProcess();
 public static final native boolean DuplicateHandle(long hSourceProcessHandle, long hSourceHandle, long hTargetProcessHandle,
 		long [] lpTargetHandle, int dwDesiredAccess, boolean b, int dwOptions);
 
+
+public static long OpenThemeData(long hwnd, char[] themeName, int dpi) {
+	if (OsVersion.IS_WIN10_1809) {
+		return OS.OpenThemeDataForDpi(hwnd, themeName, dpi);
+	} else {
+		return OS.OpenThemeData(hwnd, themeName);
+	}
+}
 }

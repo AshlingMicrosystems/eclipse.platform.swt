@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2020 Red Hat Inc. and others.
+ * Copyright (c) 2020, 2024 Red Hat Inc. and others.
  *
  * This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License 2.0
@@ -14,8 +14,10 @@
 package org.eclipse.swt.internal;
 
 import java.lang.reflect.*;
+import java.util.function.*;
 
 import org.eclipse.swt.internal.gtk.*;
+import org.eclipse.swt.internal.gtk3.*;
 import org.eclipse.swt.widgets.*;
 
 /**
@@ -28,6 +30,41 @@ import org.eclipse.swt.widgets.*;
 public class SyncDialogUtil {
 	static int responseID;
 	static Callback dialogResponseCallback;
+	static Function<Long, Long> dialogAsyncFinish;
+	static Long dialogAsyncValue;
+
+	/**
+	 * This method implements the {@code AsyncReadyCallback} mechanism that is
+	 * used in GTK4. Most operations within GTK4 are executed asynchronously,
+	 * where the user is given the option to respond to the completion of such
+	 * an operation via a callback method, in order to e.g. process the result
+	 * or to apply additional cleanup tasks.<br>
+	 * When calling this method, the asynchronous operation is initiated via the
+	 * {code asyncOpen} parameter. Callers have to ensure that the callback
+	 * address is used as argument for the {@code AsyncReadyCallback} parameter.
+	 * From within the callback routine, the {@code asyncFinish} function is
+	 * called, receiving the {@code AsyncResult} of the callback as argument and
+	 * returning the {@code long} value of the callback function.<br>
+	 * This method blocks until the callback method has been called. It is
+	 * therefore essential that callers use the address of the {@link Callback}
+	 * as address for the {@code AsyncReadyCallback} object.
+	 */
+	static public long run(Display display, AsyncReadyCallback callback) {
+		initializeResponseCallback();
+
+		dialogAsyncFinish = callback::await;
+		callback.async(dialogResponseCallback.getAddress());
+
+		while (!display.isDisposed()) {
+			if (dialogAsyncValue != null) {
+				break;
+			}
+			display.readAndDispatch();
+		}
+
+		disposeResponseCallback();
+		return dialogAsyncValue;
+	}
 
 	/**
 	 * A blocking call that waits for the handling of the signal before returning
@@ -40,7 +77,11 @@ public class SyncDialogUtil {
 		if (isNativeDialog) {
 			GTK.gtk_native_dialog_show(handle);
 		} else {
-			GTK.gtk_widget_show(handle);
+			if (GTK.GTK4) {
+				GTK.gtk_widget_set_visible(handle, true);
+			} else {
+				GTK3.gtk_widget_show(handle);
+			}
 		}
 
 		while (!display.isDisposed()) {
@@ -53,7 +94,7 @@ public class SyncDialogUtil {
 		}
 
 		disposeResponseCallback();
-		return responseID;
+		return (int) responseID;
 	}
 
 	/**
@@ -61,13 +102,15 @@ public class SyncDialogUtil {
 	 * This function should be called before connect the dialog to the "response" signal, as this sets up the callback.
 	 */
 	static void initializeResponseCallback() {
-		dialogResponseCallback = new Callback(SyncDialogUtil.class, "dialogResponseProc", void.class, new Type[] {long.class, int.class, long.class});
+		dialogResponseCallback = new Callback(SyncDialogUtil.class, "dialogResponseProc", void.class, new Type[] {long.class, long.class, long.class});
+		dialogAsyncValue = null;
 		responseID = -1;
 	}
 
 	static void disposeResponseCallback() {
 		dialogResponseCallback.dispose();
 		dialogResponseCallback = null;
+		dialogAsyncFinish = null;
 	}
 
 	/**
@@ -77,7 +120,10 @@ public class SyncDialogUtil {
 	 *
 	 * Note: Native dialogs are platform dialogs that don't use GtkDialog or GtkWindow.
 	 */
-	static void dialogResponseProc(long dialog, int response_id, long user_data) {
-		responseID = response_id;
+	static void dialogResponseProc(long dialog, long response_id, long user_data) {
+		if (dialogAsyncFinish != null) {
+			dialogAsyncValue = dialogAsyncFinish.apply(response_id);
+		}
+		responseID = (int) response_id;
 	}
 }

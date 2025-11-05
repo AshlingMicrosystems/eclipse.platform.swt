@@ -274,26 +274,6 @@ void closeWidget () {
 	if (event.doit && !isDisposed ()) dispose ();
 }
 
-int compare (ImageData data1, ImageData data2, int width, int height, int depth) {
-	int value1 = Math.abs (data1.width - width), value2 = Math.abs (data2.width - width);
-	if (value1 == value2) {
-		int transparent1 = data1.getTransparencyType ();
-		int transparent2 = data2.getTransparencyType ();
-		if (transparent1 == transparent2) {
-			if (data1.depth == data2.depth) return 0;
-			return data1.depth > data2.depth && data1.depth <= depth ? -1 : 1;
-		}
-		if (transparent1 == SWT.TRANSPARENCY_ALPHA) return -1;
-		if (transparent2 == SWT.TRANSPARENCY_ALPHA) return 1;
-		if (transparent1 == SWT.TRANSPARENCY_MASK) return -1;
-		if (transparent2 == SWT.TRANSPARENCY_MASK) return 1;
-		if (transparent1 == SWT.TRANSPARENCY_PIXEL) return -1;
-		if (transparent2 == SWT.TRANSPARENCY_PIXEL) return 1;
-		return 0;
-	}
-	return value1 < value2 ? -1 : 1;
-}
-
 @Override
 Widget computeTabGroup () {
 	return this;
@@ -313,11 +293,11 @@ Control computeTabRoot () {
 	int bits1 = OS.GetWindowLong (handle, OS.GWL_STYLE);
 	int bits2 = OS.GetWindowLong (handle, OS.GWL_EXSTYLE);
 	boolean hasMenu = OS.GetMenu (handle) != 0;
-	OS.AdjustWindowRectEx (rect, bits1, hasMenu, bits2);
+	adjustWindowRectEx(rect, bits1, hasMenu, bits2);
 
 	/* Get the size of the scroll bars */
-	if (horizontalBar != null) rect.bottom += OS.GetSystemMetrics (OS.SM_CYHSCROLL);
-	if (verticalBar != null) rect.right += OS.GetSystemMetrics (OS.SM_CXVSCROLL);
+	if (horizontalBar != null) rect.bottom += getSystemMetrics (OS.SM_CYHSCROLL);
+	if (verticalBar != null) rect.right += getSystemMetrics (OS.SM_CXVSCROLL);
 
 	/* Compute the height of the menu bar */
 	if (hasMenu) {
@@ -326,7 +306,7 @@ Control computeTabRoot () {
 		OS.SendMessage (handle, OS.WM_NCCALCSIZE, 0, testRect);
 		while ((testRect.bottom - testRect.top) < height) {
 			if (testRect.bottom - testRect.top == 0) break;
-			rect.top -= OS.GetSystemMetrics (OS.SM_CYMENU) - OS.GetSystemMetrics (OS.SM_CYBORDER);
+			rect.top -= getSystemMetrics (OS.SM_CYMENU) - getSystemMetrics (OS.SM_CYBORDER);
 			OS.SetRect (testRect, 0, 0, rect.right - rect.left, rect.bottom - rect.top);
 			OS.SendMessage (handle, OS.WM_NCCALCSIZE, 0, testRect);
 		}
@@ -466,13 +446,13 @@ void fixDecorations (Decorations newDecorations, Control control, Menu [] menus)
 		* the window restored.  There is no fix for this problem at
 		* this time.
 		*/
-		if (horizontalBar != null) width -= OS.GetSystemMetrics (OS.SM_CYHSCROLL);
-		if (verticalBar != null) height -= OS.GetSystemMetrics (OS.SM_CXVSCROLL);
+		if (horizontalBar != null) width -= getSystemMetrics (OS.SM_CYHSCROLL);
+		if (verticalBar != null) height -= getSystemMetrics (OS.SM_CXVSCROLL);
 		RECT rect = new RECT ();
 		int bits1 = OS.GetWindowLong (handle, OS.GWL_STYLE);
 		int bits2 = OS.GetWindowLong (handle, OS.GWL_EXSTYLE);
 		boolean hasMenu = OS.GetMenu (handle) != 0;
-		OS.AdjustWindowRectEx (rect, bits1, hasMenu, bits2);
+		adjustWindowRectEx(rect, bits1, hasMenu, bits2);
 		width = Math.max (0, width - (rect.right - rect.left));
 		height = Math.max (0, height - (rect.bottom - rect.top));
 		return new Rectangle (0, 0, width, height);
@@ -882,7 +862,7 @@ public void setImage (Image image) {
 	setImages (image, null);
 }
 
-void setImages (Image image, Image [] images) {
+private void setImages (Image image, Image [] images) {
 	if (smallImage != null) smallImage.dispose ();
 	if (largeImage != null) largeImage.dispose ();
 	smallImage = largeImage = null;
@@ -892,33 +872,27 @@ void setImages (Image image, Image [] images) {
 		smallIcon = largeIcon = image;
 	} else {
 		if (images != null && images.length > 0) {
-			int depth = display.getIconDepth ();
-			ImageData [] datas = null;
-			if (images.length > 1) {
-				Image [] bestImages = new Image [images.length];
-				System.arraycopy (images, 0, bestImages, 0, images.length);
-				datas = new ImageData [images.length];
-				for (int i=0; i<datas.length; i++) {
-					datas [i] = images [i].getImageData (getZoom());
-				}
-				images = bestImages;
-				sort (images, datas, OS.GetSystemMetrics (OS.SM_CXSMICON), OS.GetSystemMetrics (OS.SM_CYSMICON), depth);
-			}
-			smallIcon = images [0];
-			if (images.length > 1) {
-				sort (images, datas, OS.GetSystemMetrics (OS.SM_CXICON), OS.GetSystemMetrics (OS.SM_CYICON), depth);
-			}
-			largeIcon = images [0];
+			int depth = display.getIconDepth();
+
+			ImageData[] imageData = getImageDataAt100(images);
+
+			int smallIconWidthAt100 = getSystemMetrics(OS.SM_CXSMICON);
+			int smallIconIndex = findIndexOfClosest(imageData, smallIconWidthAt100, depth);
+			smallIcon = images[smallIconIndex];
+
+			int largeIconWidthAt100 = getSystemMetrics(OS.SM_CXICON);
+			int largeIconIndex = findIndexOfClosest(imageData, largeIconWidthAt100, depth);
+			largeIcon = images[largeIconIndex];
 		}
 	}
 	if (smallIcon != null) {
 		switch (smallIcon.type) {
 			case SWT.BITMAP:
-				smallImage = Display.createIcon (smallIcon);
-				hSmallIcon = smallImage.handle;
+				smallImage = Display.createIcon (smallIcon, getZoom());
+				hSmallIcon = Image.win32_getHandle(smallImage, getZoom());
 				break;
 			case SWT.ICON:
-				hSmallIcon = smallIcon.handle;
+				hSmallIcon = Image.win32_getHandle(smallIcon, getZoom());
 				break;
 		}
 	}
@@ -926,11 +900,11 @@ void setImages (Image image, Image [] images) {
 	if (largeIcon != null) {
 		switch (largeIcon.type) {
 			case SWT.BITMAP:
-				largeImage = Display.createIcon (largeIcon);
-				hLargeIcon = largeImage.handle;
+				largeImage = Display.createIcon (largeIcon, getZoom());
+				hLargeIcon = Image.win32_getHandle(largeImage, getZoom());
 				break;
 			case SWT.ICON:
-				hLargeIcon = largeIcon.handle;
+				hLargeIcon = Image.win32_getHandle(largeIcon, getZoom());
 				break;
 		}
 	}
@@ -947,6 +921,64 @@ void setImages (Image image, Image [] images) {
 		int flags = OS.RDW_FRAME | OS.RDW_INVALIDATE;
 		OS.RedrawWindow (handle, null, 0, flags);
 	}
+}
+
+private static ImageData[] getImageDataAt100(Image[] images) {
+	ImageData[] datas = new ImageData[images.length];
+	for (int i = 0; i < images.length; i++) {
+		datas[i] = images[i].getImageData(100);
+	}
+	return datas;
+}
+
+private static int findIndexOfClosest(ImageData[] imageData, int targetWidth, int targetDepth) {
+	int closestIndex = 0;
+	ImageData closestData = imageData[0];
+	for (int i = 1; i < imageData.length; i++) {
+		if (isCloserThan(imageData[i], closestData, targetWidth, targetDepth)) {
+			closestIndex = i;
+			closestData = imageData[i];
+		}
+	}
+
+	return closestIndex;
+}
+
+private static boolean isCloserThan(ImageData dataToTest, ImageData referenceData, int targetWidth, int targetDepth) {
+	int diffWidthToTest = Math.abs(dataToTest.width - targetWidth);
+	int diffReferenceWidth = Math.abs(referenceData.width - targetWidth);
+
+	// The closer the width the better
+	if (diffWidthToTest != diffReferenceWidth)
+		return diffWidthToTest < diffReferenceWidth;
+
+	int transparencyToTest = dataToTest.getTransparencyType();
+	int referenceTransparency = referenceData.getTransparencyType();
+
+	// If they have the same transparency then the bigger the pixel depth (without
+	// surpassing the target depth) the better
+	if (transparencyToTest == referenceTransparency) {
+		if (dataToTest.depth == referenceData.depth)
+			return false;
+
+		return dataToTest.depth > referenceData.depth && dataToTest.depth <= targetDepth;
+	}
+
+	// If they have different transparency, favor (in this order): the one with
+	// an alpha channel, the one with a mask, the one with a transparency pixel
+	if (transparencyToTest == SWT.TRANSPARENCY_ALPHA)
+		return true;
+	if (referenceTransparency == SWT.TRANSPARENCY_ALPHA)
+		return false;
+	if (transparencyToTest == SWT.TRANSPARENCY_MASK)
+		return true;
+	if (referenceTransparency == SWT.TRANSPARENCY_MASK)
+		return false;
+	if (transparencyToTest == SWT.TRANSPARENCY_PIXEL)
+		return true;
+	if (referenceTransparency == SWT.TRANSPARENCY_PIXEL)
+		return false;
+	return false;
 }
 
 /**
@@ -1313,26 +1345,6 @@ public void setVisible (boolean visible) {
 	}
 }
 
-void sort (Image [] images, ImageData [] datas, int width, int height, int depth) {
-	/* Shell Sort from K&R, pg 108 */
-	int length = images.length;
-	if (length <= 1) return;
-	for (int gap=length/2; gap>0; gap/=2) {
-		for (int i=gap; i<length; i++) {
-			for (int j=i-gap; j>=0; j-=gap) {
-				if (compare (datas [j], datas [j + gap], width, height, depth) >= 0) {
-					Image swap = images [j];
-					images [j] = images [j + gap];
-					images [j + gap] = swap;
-					ImageData swapData = datas [j];
-					datas [j] = datas [j + gap];
-					datas [j + gap] = swapData;
-				}
-			}
-		}
-	}
-}
-
 @Override
 boolean translateAccelerator (MSG msg) {
 	if (!isEnabled () || !isActive ()) return false;
@@ -1695,22 +1707,20 @@ private static void handleDPIChange(Widget widget, int newZoom, float scalingFac
 
 	Image image = decorations.getImage();
 	if (image != null) {
-		decorations.setImage(Image.win32_new(image, newZoom));
+		decorations.setImage(image);
 	}
 
 	Image[] images = decorations.getImages();
-	if (images != null) {
-		for(Image subImage : images) {
-			if (subImage != null) {
-				Image.win32_new(subImage, newZoom);
-			}
-		}
+	if (images != null && images.length > 0) {
 		decorations.setImages(images);
 	}
 
-	Menu menuBar = decorations.getMenuBar();
-	if (menuBar != null) {
-		DPIZoomChangeRegistry.applyChange(menuBar, newZoom, scalingFactor);
+	DPIZoomChangeRegistry.applyChange(decorations.getMenuBar(), newZoom, scalingFactor);
+
+	if (decorations.menus != null) {
+		for (Menu menu : decorations.menus) {
+			DPIZoomChangeRegistry.applyChange(menu, newZoom, scalingFactor);
+		}
 	}
 }
 }

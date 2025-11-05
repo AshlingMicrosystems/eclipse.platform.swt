@@ -137,7 +137,7 @@ static int checkStyle (int style) {
 			long hDC = OS.GetDC (handle);
 			long hTheme = 0;
 			if (isAppThemed ()) {
-				hTheme = display.hExplorerBarTheme ();
+				hTheme = display.hExplorerBarTheme(nativeZoom);
 			}
 			long hCurrentFont = 0, oldFont = 0;
 			if (hTheme == 0) {
@@ -247,13 +247,13 @@ void drawThemeBackground (long hDC, long hwnd, RECT rect) {
 	RECT rect2 = new RECT ();
 	OS.GetClientRect (handle, rect2);
 	OS.MapWindowPoints (handle, hwnd, rect2, 2);
-	OS.DrawThemeBackground (display.hExplorerBarTheme (), hDC, OS.EBP_NORMALGROUPBACKGROUND, 0, rect2, null);
+	OS.DrawThemeBackground (display.hExplorerBarTheme(nativeZoom), hDC, OS.EBP_NORMALGROUPBACKGROUND, 0, rect2, null);
 }
 
 void drawWidget (GC gc, RECT clipRect) {
 	long hTheme = 0;
 	if (isAppThemed ()) {
-		hTheme = display.hExplorerBarTheme ();
+		hTheme = display.hExplorerBarTheme(nativeZoom);
 	}
 	if (hTheme != 0) {
 		RECT rect = new RECT ();
@@ -391,7 +391,7 @@ public ExpandItem [] getItems () {
  */
 public int getSpacing () {
 	checkWidget ();
-	return DPIUtil.autoScaleDown(getSpacingInPixels ());
+	return DPIUtil.scaleDown(getSpacingInPixels (), getZoom());
 }
 
 int getSpacingInPixels () {
@@ -509,7 +509,7 @@ void setBackgroundPixel (int pixel) {
 @Override
 public void setFont (Font font) {
 	super.setFont (font);
-	hFont = font != null ? font.handle : 0;
+	hFont = font != null ? SWTFontProvider.getFontHandle(font, getNativeZoom()) : 0;
 	layoutItems (0, true);
 }
 
@@ -561,7 +561,7 @@ void setScrollbar () {
  */
 public void setSpacing (int spacing) {
 	checkWidget ();
-	setSpacingInPixels(DPIUtil.autoScaleUp(spacing));
+	setSpacingInPixels(DPIUtil.scaleUp(spacing, getZoom()));
 }
 
 void setSpacingInPixels (int spacing) {
@@ -789,7 +789,7 @@ LRESULT WM_PAINT (long wParam, long lParam) {
 			if (hooks (SWT.Paint) || filters (SWT.Paint)) {
 				Event event = new Event ();
 				event.gc = gc;
-				event.setBoundsInPixels(new Rectangle(rect.left, rect.top, width, height));
+				event.setBounds(DPIUtil.scaleDown(new Rectangle(rect.left, rect.top, width, height), getZoom()));
 				sendEvent (SWT.Paint, event);
 				event.gc = null;
 			}
@@ -807,7 +807,7 @@ LRESULT WM_PRINTCLIENT (long wParam, long lParam) {
 	GCData data = new GCData ();
 	data.device = display;
 	data.foreground = getForegroundPixel ();
-	GC gc = GC.win32_new (wParam, data);
+	GC gc = createNewGC(wParam, data);
 	drawWidget (gc, rect);
 	gc.dispose ();
 	return result;
@@ -878,6 +878,7 @@ private static void handleDPIChange(Widget widget, int newZoom, float scalingFac
 	for (ExpandItem item : expandBar.getItems()) {
 		DPIZoomChangeRegistry.applyChange(item, newZoom, scalingFactor);
 	}
+	expandBar.layoutItems(0, true);
 	expandBar.redraw();
 }
 }

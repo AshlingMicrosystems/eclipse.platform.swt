@@ -316,8 +316,8 @@ void destroyWidget () {
 }
 
 long fontHandle (int index) {
-	if (cellFont != null && cellFont [index] != null) return cellFont [index].handle;
-	if (font != null) return font.handle;
+	if (cellFont != null && cellFont [index] != null) return SWTFontProvider.getFontHandle(cellFont[index], getNativeZoom());
+	if (font != null) return SWTFontProvider.getFontHandle(font, getNativeZoom());
 	return -1;
 }
 
@@ -375,7 +375,7 @@ public Color getBackground (int index) {
  */
 public Rectangle getBounds () {
 	checkWidget ();
-	return DPIUtil.autoScaleDown(getBoundsInPixels());
+	return DPIUtil.scaleDown(getBoundsInPixels(), getZoom());
 }
 
 Rectangle getBoundsInPixels () {
@@ -401,7 +401,7 @@ Rectangle getBoundsInPixels () {
  */
 public Rectangle getBounds (int index) {
 	checkWidget();
-	return DPIUtil.autoScaleDown(getBoundsInPixels(index));
+	return DPIUtil.scaleDown(getBoundsInPixels(index), getZoom());
 }
 
 Rectangle getBoundsInPixels (int index) {
@@ -817,7 +817,7 @@ public Image getImage (int index) {
  */
 public Rectangle getImageBounds (int index) {
 	checkWidget();
-	return DPIUtil.autoScaleDown(getImageBoundsInPixels(index));
+	return DPIUtil.scaleDown(getImageBoundsInPixels(index), getZoom());
 }
 
 Rectangle getImageBoundsInPixels (int index) {
@@ -912,7 +912,7 @@ public String getText (int index) {
  */
 public Rectangle getTextBounds (int index) {
 	checkWidget();
-	return DPIUtil.autoScaleDown(getTextBoundsInPixels(index));
+	return DPIUtil.scaleDown(getTextBoundsInPixels(index), getZoom());
 }
 
 Rectangle getTextBoundsInPixels (int index) {
@@ -1388,9 +1388,9 @@ public void setFont (Font font){
 		error (SWT.ERROR_INVALID_ARGUMENT);
 	}
 	Font oldFont = this.font;
-	if (oldFont == font) return;
-	Shell shell = parent.getShell();
-	this.font = (font == null ? font : Font.win32_new(font, shell.getNativeZoom()));
+	Font newFont = (font == null ? font : Font.win32_new(font, getNativeZoom()));
+	if (oldFont == newFont) return;
+	this.font = newFont;
 	if (oldFont != null && oldFont.equals (font)) return;
 	if (font != null) parent.customDraw = true;
 	if ((parent.style & SWT.VIRTUAL) != 0) cached = true;
@@ -1444,8 +1444,7 @@ public void setFont (int index, Font font) {
 	}
 	Font oldFont = cellFont [index];
 	if (oldFont == font) return;
-	Shell shell = parent.getShell();
-	cellFont [index] = font == null ? font : Font.win32_new(font, shell.getNativeZoom());
+	cellFont [index] = font == null ? font : Font.win32_new(font, getNativeZoom());
 	if (oldFont != null && oldFont.equals (font)) return;
 	if (font != null) parent.customDraw = true;
 	if ((parent.style & SWT.VIRTUAL) != 0) cached = true;
@@ -1821,24 +1820,15 @@ private static void handleDPIChange(Widget widget, int newZoom, float scalingFac
 	if (!(widget instanceof TreeItem treeItem)) {
 		return;
 	}
-	Image[] images = treeItem.images;
-	if (images != null) {
-		for (Image innerImage : images) {
-			if (innerImage != null) {
-				Image.win32_new(innerImage, newZoom);
-			}
-		}
-	}
 	Font font = treeItem.font;
 	if (font != null) {
 		treeItem.setFont(font);
 	}
 	Font[] cellFonts = treeItem.cellFont;
 	if (cellFonts != null) {
-		Shell shell = treeItem.parent.getShell();
 		for (int index = 0; index < cellFonts.length; index++) {
 			Font cellFont = cellFonts[index];
-			cellFonts[index] = cellFont == null ? null : Font.win32_new(cellFont, shell.getNativeZoom());
+			cellFonts[index] = cellFont == null ? null : Font.win32_new(cellFont, treeItem.getNativeZoom());
 		}
 	}
 	for (TreeItem item : treeItem.getItems()) {

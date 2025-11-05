@@ -121,21 +121,21 @@ long defaultFont () {
  */
 public Rectangle getBounds () {
 	checkWidget();
-	return DPIUtil.autoScaleDown(getBoundsInPixels());
+	return DPIUtil.scaleDown(getBoundsInPixels(), getZoom());
 }
 
 Rectangle getBoundsInPixels () {
 	if (image != null) {
-		Rectangle rect = image.getBoundsInPixels ();
-		return new Rectangle (x, y, rect.width, rect.height);
+		Rectangle rect = DPIUtil.scaleUp(image.getBounds(), getZoom());
+		return new Rectangle (getXInPixels(), getYInPixels(), rect.width, rect.height);
 	}
 	if (width == 0) {
 		int [] buffer = new int [1];
 		if (OS.SystemParametersInfo (OS.SPI_GETCARETWIDTH, 0, buffer, 0)) {
-			return new Rectangle (x, y, buffer [0], height);
+			return new Rectangle (getXInPixels(), getYInPixels(), buffer [0], getHeightInPixels());
 		}
 	}
-	return new Rectangle (x, y, width, height);
+	return new Rectangle (getXInPixels(), getYInPixels(), getWidthInPixels(), getHeightInPixels());
 }
 
 /**
@@ -152,7 +152,7 @@ public Font getFont () {
 	checkWidget();
 	if (font == null) {
 		long hFont = defaultFont ();
-		return Font.win32_new (display, hFont, getZoom());
+		return Font.win32_new (display, hFont, getNativeZoom());
 	}
 	return font;
 }
@@ -185,10 +185,6 @@ public Image getImage () {
  */
 public Point getLocation () {
 	checkWidget();
-	return DPIUtil.autoScaleDown(getLocationInPixels());
-}
-
-Point getLocationInPixels () {
 	return new Point (x, y);
 }
 
@@ -219,21 +215,37 @@ public Canvas getParent () {
  */
 public Point getSize () {
 	checkWidget();
-	return DPIUtil.autoScaleDown(getSizeInPixels());
+	return DPIUtil.scaleDown(getSizeInPixels(), getZoom());
 }
 
 Point getSizeInPixels () {
 	if (image != null) {
-		Rectangle rect = image.getBoundsInPixels ();
+		Rectangle rect = DPIUtil.scaleUp(image.getBounds(), getZoom());
 		return new Point (rect.width, rect.height);
 	}
 	if (width == 0) {
 		int [] buffer = new int [1];
 		if (OS.SystemParametersInfo (OS.SPI_GETCARETWIDTH, 0, buffer, 0)) {
-			return new Point (buffer [0], height);
+			return new Point (buffer [0], getHeightInPixels());
 		}
 	}
-	return new Point (width, height);
+	return new Point (getWidthInPixels(), getHeightInPixels());
+}
+
+private int getWidthInPixels() {
+	return DPIUtil.scaleUp(width, getZoom());
+}
+
+private int getHeightInPixels() {
+	return DPIUtil.scaleUp(height, getZoom());
+}
+
+private int getXInPixels() {
+	return DPIUtil.scaleUp(x, getZoom());
+}
+
+private int getYInPixels() {
+	return DPIUtil.scaleUp(y, getZoom());
 }
 
 /**
@@ -293,7 +305,7 @@ void killFocus () {
 void move () {
 	moved = false;
 	setCurrentCaret(this);
-	if (!OS.SetCaretPos (x, y)) return;
+	if (!OS.SetCaretPos (getXInPixels(), getYInPixels())) return;
 	resizeIME ();
 }
 
@@ -353,16 +365,16 @@ void resize () {
 	resized = false;
 	long hwnd = parent.handle;
 	OS.DestroyCaret ();
-	long hBitmap = image != null ? image.handle : 0;
-	int width = this.width;
-	if (image == null && width == 0) {
+	long hBitmap = image != null ? Image.win32_getHandle(image, getZoom()) : 0;
+	int widthInPixels = this.getWidthInPixels();
+	if (image == null && widthInPixels == 0) {
 		int [] buffer = new int [1];
 		if (OS.SystemParametersInfo (OS.SPI_GETCARETWIDTH, 0, buffer, 0)) {
-			width = buffer [0];
+			widthInPixels = buffer [0];
 		}
 	}
-	OS.CreateCaret (hwnd, hBitmap, width, height);
-	OS.SetCaretPos (x, y);
+	OS.CreateCaret (hwnd, hBitmap, widthInPixels, getHeightInPixels());
+	OS.SetCaretPos (getXInPixels(), getYInPixels());
 	OS.ShowCaret (hwnd);
 	move ();
 }
@@ -395,10 +407,6 @@ void restoreIMEFont () {
  */
 public void setBounds (int x, int y, int width, int height) {
 	checkWidget();
-	setBoundsInPixels(DPIUtil.autoScaleUp(x), DPIUtil.autoScaleUp(y), DPIUtil.autoScaleUp(width), DPIUtil.autoScaleUp(height));
-}
-
-void setBoundsInPixels (int x, int y, int width, int height) {
 	boolean samePosition = this.x == x && this.y == y;
 	boolean sameExtent = this.width == width && this.height == height;
 	if (samePosition && sameExtent && isCurrentCaret()) return;
@@ -430,25 +438,21 @@ void setBoundsInPixels (int x, int y, int width, int height) {
  */
 public void setBounds (Rectangle rect) {
 	if (rect == null) error (SWT.ERROR_NULL_ARGUMENT);
-	setBoundsInPixels(DPIUtil.autoScaleUp(rect));
-}
-
-void setBoundsInPixels (Rectangle rect) {
-	setBoundsInPixels (rect.x, rect.y, rect.width, rect.height);
+	setBounds(rect.x, rect.y, rect.width, rect.height);
 }
 
 void setFocus () {
 	long hwnd = parent.handle;
 	long hBitmap = 0;
-	if (image != null) hBitmap = image.handle;
-	int width = this.width;
-	if (image == null && width == 0) {
+	if (image != null) hBitmap = Image.win32_getHandle(image, getZoom());
+	int widthInPixels = this.getWidthInPixels();
+	if (image == null && widthInPixels == 0) {
 		int [] buffer = new int [1];
 		if (OS.SystemParametersInfo (OS.SPI_GETCARETWIDTH, 0, buffer, 0)) {
-			width = buffer [0];
+			widthInPixels = buffer [0];
 		}
 	}
-	OS.CreateCaret (hwnd, hBitmap, width, height);
+	OS.CreateCaret (hwnd, hBitmap, widthInPixels, getHeightInPixels());
 	move ();
 	setIMEFont ();
 	if (isVisible) OS.ShowCaret (hwnd);
@@ -474,8 +478,7 @@ public void setFont (Font font) {
 	if (font != null && font.isDisposed ()) {
 		error (SWT.ERROR_INVALID_ARGUMENT);
 	}
-	Shell shell = parent.getShell();
-	this.font = font == null ? null : Font.win32_new(font, shell.getNativeZoom());
+	this.font = font == null ? null : Font.win32_new(font, getNativeZoom());
 	if (hasFocus ()) setIMEFont ();
 }
 
@@ -506,7 +509,7 @@ public void setImage (Image image) {
 void setIMEFont () {
 	if (!OS.IsDBLocale) return;
 	long hFont = 0;
-	if (font != null) hFont = font.handle;
+	if (font != null) hFont = SWTFontProvider.getFontHandle(font, getNativeZoom());
 	if (hFont == 0) hFont = defaultFont ();
 	long hwnd = parent.handle;
 	long hIMC = OS.ImmGetContext (hwnd);
@@ -538,10 +541,6 @@ void setIMEFont () {
  */
 public void setLocation (int x, int y) {
 	checkWidget();
-	setLocationInPixels(DPIUtil.autoScaleUp(x), DPIUtil.autoScaleUp(y));
-}
-
-void setLocationInPixels (int x, int y) {
 	if (this.x == x && this.y == y && isCurrentCaret())  return;
 	this.x = x;  this.y = y;
 	moved = true;
@@ -571,8 +570,7 @@ private void setCurrentCaret(Caret caret) {
 public void setLocation (Point location) {
 	checkWidget();
 	if (location == null) error (SWT.ERROR_NULL_ARGUMENT);
-	location = DPIUtil.autoScaleUp(location);
-	setLocationInPixels(location.x, location.y);
+	setLocation(location.x, location.y);
 }
 
 /**
@@ -588,12 +586,9 @@ public void setLocation (Point location) {
  */
 public void setSize (int width, int height) {
 	checkWidget();
-	setSizeInPixels(DPIUtil.autoScaleUp(width), DPIUtil.autoScaleUp(height));
-}
-
-void setSizeInPixels (int width, int height) {
 	if (this.width == width && this.height == height && isCurrentCaret()) return;
-	this.width = width;  this.height = height;
+	this.width = width;
+	this.height = height;
 	resized = true;
 	if (isVisible && hasFocus ()) resize ();
 }
@@ -614,8 +609,7 @@ void setSizeInPixels (int width, int height) {
 public void setSize (Point size) {
 	checkWidget();
 	if (size == null) error (SWT.ERROR_NULL_ARGUMENT);
-	size = DPIUtil.autoScaleUp(size);
-	setSizeInPixels(size.x, size.y);
+	setSize(size.x, size.y);
 }
 
 /**
@@ -652,6 +646,29 @@ public void setVisible (boolean visible) {
 	}
 }
 
+/**
+ * <b>IMPORTANT:</b> This method is not part of the public
+ * API for Image. It is marked public only so that it
+ * can be shared within the packages provided by SWT. It is not
+ * available on all platforms, and should never be called from
+ * application code.
+ *
+ * Sets the height o the caret in points.
+ *
+ * @param caret the caret to set the height of
+ * @param height the height of caret to be set in points.
+ *
+ * @noreference This method is not intended to be referenced by clients.
+ */
+public static void win32_setHeight(Caret caret, int height) {
+	caret.checkWidget();
+	if(caret.height != height) {
+		caret.height = height;
+		caret.resized = true;
+	}
+	if(caret.isVisible && caret.hasFocus()) caret.resize();
+}
+
 private static void handleDPIChange(Widget widget, int newZoom, float scalingFactor) {
 	if (!(widget instanceof Caret caret)) {
 		return;
@@ -659,7 +676,7 @@ private static void handleDPIChange(Widget widget, int newZoom, float scalingFac
 
 	Image image = caret.getImage();
 	if (image != null) {
-		caret.setImage(Image.win32_new(image, newZoom));
+		caret.setImage(image);
 	}
 
 	if (caret.font != null) {
@@ -667,3 +684,4 @@ private static void handleDPIChange(Widget widget, int newZoom, float scalingFac
 	}
 }
 }
+

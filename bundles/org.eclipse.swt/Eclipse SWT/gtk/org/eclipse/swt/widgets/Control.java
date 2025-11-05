@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2018 IBM Corporation and others.
+ * Copyright (c) 2000, 2025 IBM Corporation and others.
  *
  * This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License 2.0
@@ -832,9 +832,7 @@ public Point computeSize (int wHint, int hHint, boolean changed) {
 	checkWidget();
 	if (wHint != SWT.DEFAULT && wHint < 0) wHint = 0;
 	if (hHint != SWT.DEFAULT && hHint < 0) hHint = 0;
-	wHint = DPIUtil.autoScaleUp(wHint);
-	hHint = DPIUtil.autoScaleUp(hHint);
-	return DPIUtil.autoScaleDown (computeSizeInPixels (wHint, hHint, changed));
+	return computeSizeInPixels (wHint, hHint, changed);
 }
 
 Point computeSizeInPixels (int wHint, int hHint, boolean changed) {
@@ -855,14 +853,14 @@ Point computeNativeSize (long h, int wHint, int hHint, boolean changed) {
 		int [] natural_size = new int [1];
 		if (wHint == SWT.DEFAULT) {
 			if (GTK.GTK4) {
-				GTK4.gtk_widget_measure(h, GTK.GTK_ORIENTATION_HORIZONTAL, height, null, natural_size, null, null);
+				GTK4.gtk_widget_measure(h, GTK.GTK_ORIENTATION_HORIZONTAL, height>0?height:-1, null, natural_size, null, null);
 			} else {
 				GTK3.gtk_widget_get_preferred_width_for_height (h, height, null, natural_size);
 			}
 			width = natural_size [0];
 		} else {
 			if (GTK.GTK4) {
-				GTK4.gtk_widget_measure(h, GTK.GTK_ORIENTATION_VERTICAL, width, null, natural_size, null, null);
+				GTK4.gtk_widget_measure(h, GTK.GTK_ORIENTATION_VERTICAL, width>0?width:-1, null, natural_size, null, null);
 			} else {
 				GTK3.gtk_widget_get_preferred_height_for_width (h, width, null, natural_size);
 			}
@@ -933,7 +931,7 @@ Accessible _getAccessible () {
  */
 public Rectangle getBounds () {
 	checkWidget();
-	return DPIUtil.autoScaleDown(getBoundsInPixels());
+	return getBoundsInPixels();
 }
 
 Rectangle getBoundsInPixels () {
@@ -975,7 +973,6 @@ Rectangle getBoundsInPixels () {
 public void setBounds (Rectangle rect) {
 	checkWidget ();
 	if (rect == null) error (SWT.ERROR_NULL_ARGUMENT);
-	rect = DPIUtil.autoScaleUp(rect);
 	setBounds (rect.x, rect.y, Math.max (0, rect.width), Math.max (0, rect.height), true, true);
 }
 
@@ -1015,7 +1012,7 @@ void setBoundsInPixels (Rectangle rect) {
  */
 public void setBounds (int x, int y, int width, int height) {
 	checkWidget();
-	Rectangle rect = DPIUtil.autoScaleUp(new Rectangle (x, y, width, height));
+	Rectangle rect = new Rectangle (x, y, width, height);
 	setBounds (rect.x, rect.y, Math.max (0, rect.width), Math.max (0, rect.height), true, true);
 }
 
@@ -1148,10 +1145,10 @@ int setBounds (int x, int y, int width, int height, boolean move, boolean resize
 		 */
 		if (!GTK.gtk_widget_get_visible(topHandle))  {
 			Control focusControl = display.getFocusControl();
-			GTK.gtk_widget_show(topHandle);
+			gtk_widget_show(topHandle);
 			gtk_widget_get_preferred_size (topHandle, requisition);
 			gtk_widget_size_allocate(topHandle, allocation, -1);
-			GTK.gtk_widget_hide(topHandle);
+			gtk_widget_hide(topHandle);
 			/* Bug 540002: Showing and hiding widget causes original focused control to loose focus,
 			 * Reset focus to original focused control after dealing with allocation.
 			 */
@@ -1183,7 +1180,7 @@ int setBounds (int x, int y, int width, int height, boolean move, boolean resize
 				}
 			}
 
-			GTK.gtk_widget_hide(topHandle);
+			gtk_widget_hide(topHandle);
 		} else {
 			if ((state & HIDDEN) == 0) {
 				if (!GTK.GTK4) {
@@ -1192,7 +1189,7 @@ int setBounds (int x, int y, int width, int height, boolean move, boolean resize
 					}
 				}
 
-				GTK.gtk_widget_show(topHandle);
+				gtk_widget_show(topHandle);
 			}
 		}
 
@@ -1215,10 +1212,15 @@ int setBounds (int x, int y, int width, int height, boolean move, boolean resize
 }
 
 /**
- * Returns a point describing the receiver's location relative
- * to its parent in points (or its display if its parent is null), unless
- * the receiver is a shell. In this case, the point is
- * relative to the display.
+ * Returns a point describing the receiver's location relative to its parent in
+ * points (or its display if its parent is null), unless the receiver is a
+ * shell. In this case, the point is usually relative to the display.
+ * <p>
+ * <b>Warning:</b> When executing this operation on a shell, it may not yield a
+ * value with the expected meaning on some platforms. For example, executing
+ * this operation on a shell when the environment uses the Wayland protocol, the
+ * result is <b>not</b> a coordinate relative to the display. It will not change
+ * when moving the shell.
  *
  * @return the receiver's location
  *
@@ -1229,7 +1231,7 @@ int setBounds (int x, int y, int width, int height, boolean move, boolean resize
  */
 public Point getLocation () {
 	checkWidget();
-	return DPIUtil.autoScaleDown(getLocationInPixels());
+	return getLocationInPixels();
 }
 
 Point getLocationInPixels () {
@@ -1247,11 +1249,14 @@ Point getLocationInPixels () {
 }
 
 /**
- * Sets the receiver's location to the point specified by
- * the arguments which are relative to the receiver's
- * parent (or its display if its parent is null), unless
- * the receiver is a shell. In this case, the point is
- * relative to the display.
+ * Sets the receiver's location to the point specified by the argument which
+ * is relative to the receiver's parent (or its display if its parent is null),
+ * unless the receiver is a shell. In this case, the point is relative to the
+ * display.
+ * <p>
+ * <b>Warning:</b> When executing this operation on a shell, it may not have the
+ * intended effect on some platforms. For example, executing this operation on a
+ * shell when the environment uses the Wayland protocol, nothing will happen.
  *
  * @param location the new location for the receiver
  *
@@ -1263,7 +1268,6 @@ Point getLocationInPixels () {
 public void setLocation (Point location) {
 	checkWidget ();
 	if (location == null) error (SWT.ERROR_NULL_ARGUMENT);
-	location = DPIUtil.autoScaleUp(location);
 	setBounds (location.x, location.y, 0, 0, true, false);
 }
 
@@ -1274,11 +1278,14 @@ void setLocationInPixels (Point location) {
 }
 
 /**
- * Sets the receiver's location to the point specified by
- * the arguments which are relative to the receiver's
- * parent (or its display if its parent is null), unless
- * the receiver is a shell. In this case, the point is
- * relative to the display.
+ * Sets the receiver's location to the point specified by the arguments which
+ * are relative to the receiver's parent (or its display if its parent is null),
+ * unless the receiver is a shell. In this case, the point is relative to the
+ * display.
+ * <p>
+ * <b>Warning:</b> When executing this operation on a shell, it may not have the
+ * intended effect on some platforms. For example, executing this operation on a
+ * shell when the environment uses the Wayland protocol, nothing will happen.
  *
  * @param x the new x coordinate for the receiver
  * @param y the new y coordinate for the receiver
@@ -1290,7 +1297,7 @@ void setLocationInPixels (Point location) {
  */
 public void setLocation(int x, int y) {
 	checkWidget();
-	Point loc = DPIUtil.autoScaleUp(new Point (x, y));
+	Point loc = new Point (x, y);
 	setBounds (loc.x, loc.y, 0, 0, true, false);
 }
 
@@ -1314,7 +1321,7 @@ void setLocationInPixels(int x, int y) {
  */
 public Point getSize () {
 	checkWidget();
-	return DPIUtil.autoScaleDown(getSizeInPixels());
+	return getSizeInPixels();
 }
 
 Point getSizeInPixels () {
@@ -1353,7 +1360,6 @@ Point getSizeInPixels () {
 public void setSize (Point size) {
 	checkWidget ();
 	if (size == null) error (SWT.ERROR_NULL_ARGUMENT);
-	size = DPIUtil.autoScaleUp(size);
 	setBounds (0, 0, Math.max (0, size.x), Math.max (0, size.y), false, true);
 }
 
@@ -1472,7 +1478,7 @@ void setRelations () {
  */
 public void setSize (int width, int height) {
 	checkWidget();
-	Point size = DPIUtil.autoScaleUp(new Point (width, height));
+	Point size = new Point (width, height);
 	setBounds (0, 0, Math.max (0, size.x), Math.max (0, size.y), false, true);
 }
 
@@ -1656,9 +1662,9 @@ public Point toControl(int x, int y) {
 		GDK.gdk_window_get_origin(window, origin_x, origin_y);
 	}
 
-	x -= DPIUtil.autoScaleDown(origin_x[0]);
-	y -= DPIUtil.autoScaleDown(origin_y[0]);
-	if ((style & SWT.MIRRORED) != 0) x = DPIUtil.autoScaleDown(getClientWidth()) - x;
+	x -= origin_x[0];
+	y -= origin_y[0];
+	if ((style & SWT.MIRRORED) != 0) x = getClientWidth() - x;
 
 	return new Point(x, y);
 }
@@ -1721,9 +1727,9 @@ public Point toDisplay(int x, int y) {
 		GDK.gdk_window_get_origin(window, origin_x, origin_y);
 	}
 
-	if ((style & SWT.MIRRORED) != 0) x = DPIUtil.autoScaleDown(getClientWidth()) - x;
-	x += DPIUtil.autoScaleDown(origin_x[0]);
-	y += DPIUtil.autoScaleDown(origin_y[0]);
+	if ((style & SWT.MIRRORED) != 0) x = getClientWidth() - x;
+	x += origin_x[0];
+	y += origin_y[0];
 
 	return new Point(x, y);
 }
@@ -1772,12 +1778,6 @@ public Point toDisplay (Point point) {
 	checkWidget();
 	if (point == null) error (SWT.ERROR_NULL_ARGUMENT);
 	return toDisplay (point.x, point.y);
-}
-
-Point toDisplayInPixels (Point point) {
-	checkWidget();
-	if (point == null) error (SWT.ERROR_NULL_ARGUMENT);
-	return toDisplayInPixels (point.x, point.y);
 }
 
 /**
@@ -2687,7 +2687,7 @@ boolean dragDetect (int x, int y, boolean filter, boolean dragOnTimeout, boolean
 		//Note, input params x/y are relative, the two points below are absolute coords.
 		Point startPos = null;
 		Point currPos = null;
-		startPos = display.getCursorLocationInPixels();
+		startPos = display.getCursorLocation();
 
 		while (!quit) {
 			long eventPtr = 0;
@@ -2703,7 +2703,7 @@ boolean dragDetect (int x, int y, boolean filter, boolean dragOnTimeout, boolean
 				if (eventPtr != 0) {
 					break;
 				} else {
-					currPos = display.getCursorLocationInPixels();
+					currPos = display.getCursorLocation();
 					dragging = GTK3.gtk_drag_check_threshold (handle,
 								startPos.x, startPos.y, currPos.x, currPos.y);
 					if (dragging) break;
@@ -3007,7 +3007,7 @@ GdkRGBA getBaseGdkRGBA () {
  * </ul>
  */
 public int getBorderWidth () {
-	return DPIUtil.autoScaleDown(getBorderWidthInPixels());
+	return getBorderWidthInPixels();
 }
 
 int getBorderWidthInPixels () {
@@ -3406,28 +3406,38 @@ void gtk_style_context_get_border (long context, int state, GtkBorder padding) {
  * Handling multi-press event on GTK4
  */
 @Override
-void gtk_gesture_press_event (long gesture, int n_press, double x, double y, long event) {
+int gtk_gesture_press_event (long gesture, int n_press, double x, double y, long event) {
 	mouseDown = true;
 
 	int eventButton = GDK.gdk_button_event_get_button(event);
 	int eventTime = GDK.gdk_event_get_time(event);
 	int eventState = GDK.gdk_event_get_modifier_state(event);
+	int result = GTK4.GTK_EVENT_SEQUENCE_NONE;
 
 	display.clickCount = n_press;
 	if (n_press == 1) {
-		sendMouseEvent(SWT.MouseDown, eventButton, n_press, 0, false, eventTime, x, y, false, eventState);
-		if ((state & MENU) == 0) {
+		boolean cancelled = sendMouseEvent(SWT.MouseDown, eventButton, n_press, 0, false, eventTime, x, y, false, eventState);
+		if (!cancelled) {
+			result = GTK4.GTK_EVENT_SEQUENCE_CLAIMED;
+		}
+		if ((state & MENU) != 0) {
 			if (eventButton == 3) {
-				showMenu ((int)x, (int)y);
+				if (showMenu ((int)x, (int)y)) {
+					result = GTK4.GTK_EVENT_SEQUENCE_CLAIMED;
+				}
 			}
 		}
 	} else if (n_press == 2) {
-		sendMouseEvent(SWT.MouseDoubleClick, eventButton, n_press, 0, false, eventTime, x, y, false, eventState);
+		boolean cancelled = sendMouseEvent(SWT.MouseDoubleClick, eventButton, n_press, 0, false, eventTime, x, y, false, eventState);
+		if (!cancelled) {
+			result = GTK4.GTK_EVENT_SEQUENCE_CLAIMED;
+		}
 	}
+	return result;
 }
 
 @Override
-void gtk_gesture_release_event (long gesture, int n_press, double x, double y, long event) {
+int gtk_gesture_release_event (long gesture, int n_press, double x, double y, long event) {
 	mouseDown = false;
 
 	double [] eventX = new double [1];
@@ -3440,8 +3450,13 @@ void gtk_gesture_release_event (long gesture, int n_press, double x, double y, l
 
 	lastInput.x = (int) eventX[0];
 	lastInput.y = (int) eventY[0];
-	if (containedInRegion(lastInput.x, lastInput.y)) return;
-	sendMouseEvent(SWT.MouseUp, eventButton, display.clickCount, 0, false, eventTime, 0, 0, false, eventState);
+	if (containedInRegion(lastInput.x, lastInput.y)) return GTK4.GTK_EVENT_SEQUENCE_NONE;
+	boolean cancelled = sendMouseEvent(SWT.MouseUp, eventButton, display.clickCount, 0, false, eventTime, 0, 0, false, eventState);
+	int result = GTK4.GTK_EVENT_SEQUENCE_NONE;
+	if (!cancelled) {
+		result = GTK4.GTK_EVENT_SEQUENCE_CLAIMED;
+	}
+	return result;
 }
 
 @Override
@@ -3531,8 +3546,7 @@ long gtk_button_press_event (long widget, long event, boolean sendMouseDown) {
 		// See comment in #dragDetect()
 		if (OS.isX11()) {
 			if (dragging) {
-				Point scaledEvent = DPIUtil.autoScaleDown(new Point((int)eventX[0], (int) eventY[0]));
-				sendDragEvent (eventButton[0], eventState[0], scaledEvent.x, scaledEvent.y, false);
+				sendDragEvent (eventButton[0], eventState[0], (int)eventX[0], (int)eventY[0], false);
 				if (isDisposed ()) return 1;
 			}
 		}
@@ -3607,7 +3621,7 @@ void gtk4_enter_event(long controller, double x, double y, long event) {
 		char [] chars = fixMnemonic (toolTipText, false, true);
 		buffer = Converter.wcsToMbcs (chars, true);
 	}
-	long toolHandle = getShell().handle;
+	long toolHandle = handle;
 	GTK.gtk_widget_set_tooltip_text (toolHandle, buffer);
 
 	if (display.currentControl == this) return;
@@ -3859,8 +3873,8 @@ long gtk_draw (long widget, long cairo) {
 	if (!hooksPaint ()) return 0;
 	Event event = new Event ();
 	event.count = 1;
-	Rectangle eventBounds = DPIUtil.autoScaleDown (new Rectangle (rect.x, rect.y, rect.width, rect.height));
-	if ((style & SWT.MIRRORED) != 0) eventBounds.x = DPIUtil.autoScaleDown (getClientWidth ()) - eventBounds.width - eventBounds.x;
+	Rectangle eventBounds = new Rectangle (rect.x, rect.y, rect.width, rect.height);
+	if ((style & SWT.MIRRORED) != 0) eventBounds.x = getClientWidth () - eventBounds.width - eventBounds.x;
 	event.setBounds (eventBounds);
 	GCData data = new GCData ();
 	/*
@@ -4029,6 +4043,7 @@ void gtk4_leave_event(long controller, long event) {
 
 	if (sendLeaveNotify() || display.getCursorControl() == null) {
 		sendMouseEvent(SWT.MouseExit, 0, 0, 0, 0, false, 0);
+		display.currentControl = null;
 	}
 }
 
@@ -4148,7 +4163,7 @@ long gtk_motion_notify_event (long widget, long event) {
 			int eventType = GDK.gdk_event_get_event_type(event);
 			if (eventType == GDK.GDK_3BUTTON_PRESS) return 0;
 
-			Point scaledEvent = DPIUtil.autoScaleDown(new Point((int)eventX[0], (int) eventY[0]));
+			Point scaledEvent = new Point((int)eventX[0], (int) eventY[0]);
 
 			int [] eventButton = new int [1];
 			int [] eventState = new int [1];
@@ -4681,12 +4696,6 @@ void redraw (boolean all) {
  */
 public void redraw (int x, int y, int width, int height, boolean all) {
 	checkWidget();
-	Rectangle rect = DPIUtil.autoScaleUp(new Rectangle(x, y, width, height));
-	redrawInPixels(rect.x, rect.y, rect.width, rect.height, all);
-}
-
-void redrawInPixels (int x, int y, int width, int height, boolean all) {
-	checkWidget();
 	if (!GTK.gtk_widget_get_visible (topHandle ())) return;
 	if ((style & SWT.MIRRORED) != 0) x = getClientWidth () - width - x;
 	redrawWidget (x, y, width, height, false, all, false);
@@ -4867,7 +4876,7 @@ boolean sendDragEvent (int button, int stateMask, int x, int y, boolean isStateM
 	event.button = button;
 	Rectangle eventRect = new Rectangle (x, y, 0, 0);
 	event.setBounds (eventRect);
-	if ((style & SWT.MIRRORED) != 0) event.x = DPIUtil.autoScaleDown(getClientWidth ()) - event.x;
+	if ((style & SWT.MIRRORED) != 0) event.x = getClientWidth () - event.x;
 	if (isStateMask) {
 		event.stateMask = stateMask;
 	} else {
@@ -5035,7 +5044,7 @@ boolean sendMouseEvent (int type, int button, int count, int detail, boolean sen
 	if (is_hint) {
 		// coordinates are already window-relative, see #gtk_motion_notify_event(..) and bug 94502
 		Rectangle eventRect = new Rectangle ((int)x, (int)y, 0, 0);
-		event.setBounds (DPIUtil.autoScaleDown (eventRect));
+		event.setBounds (eventRect);
 	} else {
 		int [] origin_x = new int [1], origin_y = new int [1];
 		Rectangle eventRect;
@@ -5044,15 +5053,15 @@ boolean sendMouseEvent (int type, int button, int count, int detail, boolean sen
 //			GDK.gdk_surface_get_origin (surface, origin_x, origin_y);
 //			eventRect = new Rectangle ((int)x - origin_x [0], (int)y - origin_y [0], 0, 0);
 			eventRect = new Rectangle ((int)x, (int)y, 0, 0);
-			event.setBounds (DPIUtil.autoScaleDown (eventRect));
+			event.setBounds (eventRect);
 		} else {
 			long window = eventWindow ();
 			GDK.gdk_window_get_origin (window, origin_x, origin_y);
 			eventRect = new Rectangle ((int)x - origin_x [0], (int)y - origin_y [0], 0, 0);
-			event.setBounds (DPIUtil.autoScaleDown (eventRect));
+			event.setBounds (eventRect);
 		}
 	}
-	if ((style & SWT.MIRRORED) != 0) event.x = DPIUtil.autoScaleDown (getClientWidth ()) - event.x;
+	if ((style & SWT.MIRRORED) != 0) event.x = getClientWidth () - event.x;
 	setInputState (event, state);
 
 	/**
@@ -5625,11 +5634,14 @@ boolean mustBeVisibleOnInitBounds() {
  * X11/Wayland window managers after GTK3.14.
  * TODO currently phase is set to BUBBLE = 2. Look into using groups perhaps.
  */
-private void setDragGesture () {
-	dragGesture = GTK.gtk_gesture_drag_new (handle);
-	GTK.gtk_event_controller_set_propagation_phase (dragGesture,
-	        2);
-	GTK.gtk_gesture_single_set_button (dragGesture, 0);
+private void setDragGesture() {
+	if (GTK.GTK4) {
+		dragGesture = GTK4.gtk_gesture_drag_new();
+	} else {
+		dragGesture = GTK3.gtk_gesture_drag_new(handle);
+	}
+	GTK.gtk_event_controller_set_propagation_phase(dragGesture, 2);
+	GTK.gtk_gesture_single_set_button(dragGesture, 0);
 	OS.g_signal_connect(dragGesture, OS.begin, gestureBegin.getAddress(), this.handle);
 	OS.g_signal_connect(dragGesture, OS.end, gestureEnd.getAddress(), this.handle);
 	return;
@@ -5639,20 +5651,26 @@ private void setDragGesture () {
 ///* TODO: Panning gesture requires a GtkOrientation object. Need to discuss what orientation should be default. */
 //}
 
-private void setRotateGesture () {
-	rotateGesture = GTK.gtk_gesture_rotate_new(handle);
-	GTK.gtk_event_controller_set_propagation_phase (rotateGesture,
-	        2);
-	OS.g_signal_connect (rotateGesture, OS.angle_changed, gestureRotation.getAddress(), this.handle);
+private void setRotateGesture() {
+	if (GTK.GTK4) {
+		rotateGesture = GTK4.gtk_gesture_rotate_new();
+	} else {
+		rotateGesture = GTK3.gtk_gesture_rotate_new(handle);
+	}
+	GTK.gtk_event_controller_set_propagation_phase(rotateGesture, 2);
+	OS.g_signal_connect(rotateGesture, OS.angle_changed, gestureRotation.getAddress(), this.handle);
 	OS.g_signal_connect(rotateGesture, OS.begin, gestureBegin.getAddress(), this.handle);
 	OS.g_signal_connect(rotateGesture, OS.end, gestureEnd.getAddress(), this.handle);
 	return;
 }
 
-private void setZoomGesture () {
-	zoomGesture = GTK.gtk_gesture_zoom_new(handle);
-	GTK.gtk_event_controller_set_propagation_phase (zoomGesture,
-	        2);
+private void setZoomGesture() {
+	if (GTK.GTK4) {
+		zoomGesture = GTK4.gtk_gesture_zoom_new();
+	} else {
+		zoomGesture = GTK3.gtk_gesture_zoom_new(handle);
+	}
+	GTK.gtk_event_controller_set_propagation_phase(zoomGesture, 2);
 	OS.g_signal_connect(zoomGesture, OS.scale_changed, gestureZoom.getAddress(), this.handle);
 	OS.g_signal_connect(zoomGesture, OS.begin, gestureBegin.getAddress(), this.handle);
 	OS.g_signal_connect(zoomGesture, OS.end, gestureEnd.getAddress(), this.handle);
@@ -5831,6 +5849,8 @@ public boolean setParent (Composite parent) {
 	if (parent.isDisposed()) error (SWT.ERROR_INVALID_ARGUMENT);
 	if (this.parent == parent) return true;
 	if (!isReparentable ()) return false;
+	// preserve focus when re-parenting
+	Control focusControlBeforeReparent = display.getFocusControl();
 	GTK.gtk_widget_realize (parent.handle);
 	long topHandle = topHandle ();
 	GtkAllocation allocation = new GtkAllocation ();
@@ -5879,6 +5899,10 @@ public boolean setParent (Composite parent) {
 	this.parent = parent;
 	setZOrder (null, false, true);
 	reskin (SWT.ALL);
+	// restore focus to the last Control that had it, if focus is now gone
+	if (focusControlBeforeReparent != null && !focusControlBeforeReparent.isDisposed() && display.getFocusControl() == null) {
+		focusControlBeforeReparent.setFocus();
+	}
 	return true;
 }
 
@@ -6102,7 +6126,7 @@ public void setVisible (boolean visible) {
 			if (!GTK.GTK4) {
 				if (enableWindow != 0) GDK.gdk_window_show_unraised(enableWindow);
 			}
-			GTK.gtk_widget_show (topHandle);
+			gtk_widget_show (topHandle);
 		}
 	} else {
 		/*
@@ -6127,7 +6151,7 @@ public void setVisible (boolean visible) {
 			if (isDisposed ()) return;
 			GTK.gtk_widget_set_can_focus (topHandle, true);
 		}
-		GTK.gtk_widget_hide (topHandle);
+		gtk_widget_hide (topHandle);
 		if (isDisposed ()) return;
 		if (!GTK.GTK4) {
 			if (enableWindow != 0) GDK.gdk_window_hide(enableWindow);
@@ -6267,7 +6291,7 @@ boolean showMenu (int x, int y) {
 boolean showMenu (int x, int y, int detail) {
 	Event event = new Event ();
 	Rectangle eventRect = new Rectangle (x, y, 0, 0);
-	event.setBounds (DPIUtil.autoScaleDown (eventRect));
+	event.setBounds (eventRect);
 	event.detail = detail;
 	sendEvent (SWT.MenuDetect, event);
 	//widget could be disposed at this point
@@ -6285,14 +6309,14 @@ boolean showMenu (int x, int y, int detail) {
 				if (temp != 0) OS.g_object_unref(temp);
 
 
-				menu.setLocationInPixels(x, y);
+				menu.setLocation(x, y);
 				menu.setVisible(true);
 
 				return true;
 			} else {
-				Rectangle rect = DPIUtil.autoScaleUp (event.getBounds ());
+				Rectangle rect = event.getBounds ();
 				if (rect.x != x || rect.y != y) {
-					menu.setLocationInPixels (rect.x, rect.y);
+					menu.setLocation (rect.x, rect.y);
 				}
 				menu.setVisible (true);
 				return true;
@@ -6314,9 +6338,9 @@ void showWidget () {
 	} else {
 		GTK3.gtk_container_add(parentHandle, topHandle);
 	}
-	if (handle != 0 && handle != topHandle) GTK.gtk_widget_show (handle);
+	if (handle != 0 && handle != topHandle) gtk_widget_show (handle);
 	if ((state & (ZERO_WIDTH | ZERO_HEIGHT)) == 0) {
-		if (fixedHandle != 0) GTK.gtk_widget_show (fixedHandle);
+		if (fixedHandle != 0) gtk_widget_show (fixedHandle);
 	}
 	if (fixedHandle != 0) fixStyle (fixedHandle);
 }

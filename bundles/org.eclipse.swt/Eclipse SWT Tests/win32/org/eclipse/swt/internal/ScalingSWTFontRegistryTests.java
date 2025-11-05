@@ -13,34 +13,25 @@
  *******************************************************************************/
 package org.eclipse.swt.internal;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
-import org.eclipse.swt.SWT;
-import org.eclipse.swt.graphics.Font;
-import org.eclipse.swt.graphics.FontData;
-import org.eclipse.swt.widgets.Display;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.eclipse.swt.*;
+import org.eclipse.swt.graphics.*;
+import org.eclipse.swt.widgets.*;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.*;
 
-public class ScalingSWTFontRegistryTests {
+@ExtendWith(PlatformSpecificExecutionExtension.class)
+class ScalingSWTFontRegistryTests {
 	private static String TEST_FONT = "Helvetica";
 	private SWTFontRegistry fontRegistry;
 
-	@BeforeClass
-	public static void assumeIsFittingPlatform() {
-		PlatformSpecificExecution.assumeIsFittingPlatform();
-	}
-
-	@Before
+	@BeforeEach
 	public void setUp() {
 		this.fontRegistry = new ScalingSWTFontRegistry(Display.getDefault());
 	}
 
-	@After
+	@AfterEach
 	public void tearDown() {
 		if (this.fontRegistry != null) {
 			this.fontRegistry.dispose();
@@ -76,7 +67,7 @@ public class ScalingSWTFontRegistryTests {
 
 	@Test
 	public void fontsAreScaled() {
-		FontData fontData = new FontData(TEST_FONT, 10, SWT.NORMAL);
+		FontData fontData = new FontData(TEST_FONT, 9, SWT.NORMAL);
 		FontData font100 = fontRegistry.getFont(fontData, 100).getFontData()[0];
 		FontData font200 = fontRegistry.getFont(fontData, 200).getFontData()[0];
 		assertEquals("Point height must be equal for all zoom factors", font100.getHeight(), font200.getHeight());

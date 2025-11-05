@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2024 IBM Corporation and others.
+ * Copyright (c) 2000, 2025 IBM Corporation and others.
  *
  * This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License 2.0
@@ -307,7 +307,7 @@ void _addListener (int eventType, Listener listener) {
  * be notified when an event of the given type occurs. When the
  * event does occur in the widget, the listener is notified by
  * sending it the <code>handleEvent()</code> message. The event
- * type is one of the event constants defined in class {@link SWTError}.
+ * type is one of the event constants defined in class {@link SWT}.
  *
  * @param eventType the type of event to listen for
  * @param listener the listener which should be notified when the event occurs
@@ -361,6 +361,7 @@ protected void addTypedListener (EventListener listener, int... eventTypes) {
 	if (listener == null) {
 		SWT.error(SWT.ERROR_NULL_ARGUMENT);
 	}
+	@SuppressWarnings("removal")
 	TypedListener typedListener = new TypedListener(listener);
 	for (int eventType : eventTypes) {
 		_addListener(eventType, typedListener);
@@ -730,6 +731,7 @@ public Listener[] getListeners (int eventType) {
  *
  * @since 3.126
  */
+@SuppressWarnings("removal")
 public <L extends EventListener> Stream<L> getTypedListeners (int eventType, Class<L> listenerType) {
 	return Arrays.stream(getListeners(eventType)) //
 			.filter(TypedListener.class::isInstance).map(l -> ((TypedListener) l).eventListener)
@@ -804,7 +806,9 @@ long gtk_button_release_event (long widget, long event) {
  * @param y the y coordinate, in widget allocation coordinates
  * @param event the GdkEvent captured
  */
-void gtk_gesture_press_event(long gesture, int n_press, double x, double y, long event) {}
+int gtk_gesture_press_event(long gesture, int n_press, double x, double y, long event) {
+	return GTK4.GTK_EVENT_SEQUENCE_NONE;
+}
 
 /**
  * @param gesture the corresponding controller responsible for capturing the event
@@ -813,7 +817,9 @@ void gtk_gesture_press_event(long gesture, int n_press, double x, double y, long
  * @param y the y coordinate, in widget allocation coordinates
  * @param event the GdkEvent captured
  */
-void gtk_gesture_release_event(long gesture, int n_press, double x, double y, long event) {}
+int gtk_gesture_release_event(long gesture, int n_press, double x, double y, long event) {
+	return GTK4.GTK_EVENT_SEQUENCE_NONE;
+}
 
 /**
  * @param controller the corresponding controller responsible for capturing the event
@@ -1492,8 +1498,41 @@ public void removeListener (int eventType, Listener listener) {
  *
  * @noreference This method is not intended to be referenced by clients.
  * @nooverride This method is not intended to be re-implemented or extended by clients.
+ * @deprecated Use {@link #removeListener(int, EventListener)}.
  */
+@Deprecated(forRemoval=true, since="2025-03")
 protected void removeListener (int eventType, SWTEventListener listener) {
+	removeTypedListener(eventType, listener);
+}
+
+/**
+ * Removes the listener from the collection of listeners who will
+ * be notified when an event of the given type occurs.
+ * <p>
+ * <b>IMPORTANT:</b> This method is <em>not</em> part of the SWT
+ * public API. It is marked public only so that it can be shared
+ * within the packages provided by SWT. It should never be
+ * referenced from application code.
+ * </p>
+ *
+ * @param eventType the type of event to listen for
+ * @param listener the listener which should no longer be notified
+ *
+ * @exception IllegalArgumentException <ul>
+ *    <li>ERROR_NULL_ARGUMENT - if the listener is null</li>
+ * </ul>
+ * @exception SWTException <ul>
+ *    <li>ERROR_WIDGET_DISPOSED - if the receiver has been disposed</li>
+ *    <li>ERROR_THREAD_INVALID_ACCESS - if not called from the thread that created the receiver</li>
+ * </ul>
+ *
+ * @see Listener
+ * @see #addListener
+ *
+ * @noreference This method is not intended to be referenced by clients.
+ * @nooverride This method is not intended to be re-implemented or extended by clients.
+ */
+protected void removeListener (int eventType, EventListener listener) {
 	removeTypedListener(eventType, listener);
 }
 
@@ -2496,15 +2535,20 @@ boolean keyPressReleaseProc(long controller, int keyval, int keycode, int state,
 
 void gesturePressReleaseProc(long gesture, int n_press, double x, double y, long user_data) {
 	long event = GTK4.gtk_event_controller_get_current_event(gesture);
+	long sequence = GTK4.gtk_gesture_get_last_updated_sequence(gesture);
+
+	int result = GTK4.GTK_EVENT_SEQUENCE_NONE;
 
 	switch ((int)user_data) {
 		case GESTURE_PRESSED:
-			gtk_gesture_press_event(gesture, n_press, x, y, event);
+			result = gtk_gesture_press_event(gesture, n_press, x, y, event);
 			break;
 		case GESTURE_RELEASED:
-			gtk_gesture_release_event(gesture, n_press, x, y, event);
+			result = gtk_gesture_release_event(gesture, n_press, x, y, event);
 			break;
 	}
+
+	GTK4.gtk_gesture_set_sequence_state(gesture, sequence, result);
 }
 
 void leaveProc(long controller, long handle, long user_data) {
@@ -2713,6 +2757,16 @@ void notifyDisposalTracker() {
 	if (WidgetSpy.isEnabled) {
 		WidgetSpy.getInstance().widgetDisposed(this);
 	}
+}
+
+void gtk_widget_hide(long widget) {
+	if (GTK.GTK4) GTK.gtk_widget_set_visible(widget, false);
+	else GTK3.gtk_widget_hide(widget);
+}
+
+void gtk_widget_show(long widget) {
+	if (GTK.GTK4) GTK.gtk_widget_set_visible(widget, true);
+	else GTK3.gtk_widget_show(widget);
 }
 
 }

@@ -19,6 +19,7 @@ import org.eclipse.swt.events.*;
 import org.eclipse.swt.graphics.*;
 import org.eclipse.swt.internal.*;
 import org.eclipse.swt.internal.win32.*;
+import org.eclipse.swt.internal.win32.version.*;
 
 /**
  * Instances of this class represent the "windows"
@@ -125,7 +126,6 @@ public class Shell extends Decorations {
 	ToolTip [] toolTips;
 	long hwndMDIClient, lpstrTip, toolTipHandle, balloonTipHandle, menuItemToolTipHandle;
 	int minWidth = SWT.DEFAULT, minHeight = SWT.DEFAULT, maxWidth = SWT.DEFAULT, maxHeight = SWT.DEFAULT;
-	private int nativeZoom;
 	long [] brushes;
 	boolean showWithParent, fullScreen, wasMaximized, modified, center;
 	String toolTitle, balloonTitle;
@@ -301,26 +301,17 @@ Shell (Display display, Shell parent, int style, long handle, boolean embedded) 
 		state |= FOREIGN_HANDLE;
 	}
 
-	int shellZoom;
 	int shellNativeZoom;
 	if (parent != null) {
-		shellZoom = parent.getZoom();
-		shellNativeZoom = parent.getNativeZoom();
+		shellNativeZoom = parent.nativeZoom;
 	} else {
 		int mappedDPIZoom = getMonitor().getZoom();
-		shellZoom = DPIUtil.getZoomForAutoscaleProperty(mappedDPIZoom);
 		shellNativeZoom = mappedDPIZoom;
 	}
-	this.setZoom(shellZoom);
-	this.setNativeZoom(shellNativeZoom);
+	this.nativeZoom = shellNativeZoom;
 
 	reskinWidget();
 	createWidget ();
-
-
-	if (DPIUtil.isAutoScaleOnRuntimeActive()) {
-		addListener(SWT.ZoomChanged, this::handleZoomEvent);
-	}
 }
 
 /**
@@ -591,11 +582,11 @@ void createBalloonTipHandle () {
 
 void setTitleColoring() {
 	int attributeID = 0;
-	if (OS.WIN32_BUILD >= OS.WIN32_BUILD_WIN10_2004) {
+	if (OsVersion.IS_WIN10_2004) {
 		// Documented since build 20348, but was already present since build 19041
 		final int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 		attributeID = DWMWA_USE_IMMERSIVE_DARK_MODE;
-	} else if (OS.WIN32_BUILD >= OS.WIN32_BUILD_WIN10_1809) {
+	} else if (OsVersion.IS_WIN10_1809) {
 		// Undocumented value
 		attributeID = 19;
 	} else {
@@ -1061,24 +1052,24 @@ public boolean getMaximized () {
  */
 public Point getMaximumSize () {
 	checkWidget ();
-	return DPIUtil.autoScaleDown(getMaximumSizeInPixels());
+	return DPIUtil.scaleDown(getMaximumSizeInPixels(), getZoom());
 }
 
 Point getMaximumSizeInPixels () {
 	int width = Math.min (Integer.MAX_VALUE, maxWidth);
 	int trim = SWT.TITLE | SWT.CLOSE | SWT.MIN | SWT.MAX;
 	if ((style & SWT.NO_TRIM) == 0 && (style & trim) != 0) {
-		width = Math.min (width, OS.GetSystemMetrics (OS.SM_CXMAXTRACK));
+		width = Math.min (width, getSystemMetrics (OS.SM_CXMAXTRACK));
 	}
 	int height = Math.min (Integer.MAX_VALUE, maxHeight);
 	if ((style & SWT.NO_TRIM) == 0 && (style & trim) != 0) {
 		if ((style & SWT.RESIZE) != 0) {
-			height = Math.min (height, OS.GetSystemMetrics (OS.SM_CYMAXTRACK));
+			height = Math.min (height, getSystemMetrics (OS.SM_CYMAXTRACK));
 		} else {
 			RECT rect = new RECT ();
 			int bits1 = OS.GetWindowLong (handle, OS.GWL_STYLE);
 			int bits2 = OS.GetWindowLong (handle, OS.GWL_EXSTYLE);
-			OS.AdjustWindowRectEx (rect, bits1, false, bits2);
+			adjustWindowRectEx(rect, bits1, false, bits2);
 			height = Math.min (height, rect.bottom - rect.top);
 		}
 	}
@@ -1102,24 +1093,24 @@ Point getMaximumSizeInPixels () {
  */
 public Point getMinimumSize () {
 	checkWidget ();
-	return DPIUtil.autoScaleDown(getMinimumSizeInPixels());
+	return DPIUtil.scaleDown(getMinimumSizeInPixels(), getZoom());
 }
 
 Point getMinimumSizeInPixels () {
 	int width = Math.max (0, minWidth);
 	int trim = SWT.TITLE | SWT.CLOSE | SWT.MIN | SWT.MAX;
 	if ((style & SWT.NO_TRIM) == 0 && (style & trim) != 0) {
-		width = Math.max (width, OS.GetSystemMetrics (OS.SM_CXMINTRACK));
+		width = Math.max (width, getSystemMetrics (OS.SM_CXMINTRACK));
 	}
 	int height = Math.max (0, minHeight);
 	if ((style & SWT.NO_TRIM) == 0 && (style & trim) != 0) {
 		if ((style & SWT.RESIZE) != 0) {
-			height = Math.max (height, OS.GetSystemMetrics (OS.SM_CYMINTRACK));
+			height = Math.max (height, getSystemMetrics (OS.SM_CYMINTRACK));
 		} else {
 			RECT rect = new RECT ();
 			int bits1 = OS.GetWindowLong (handle, OS.GWL_STYLE);
 			int bits2 = OS.GetWindowLong (handle, OS.GWL_EXSTYLE);
-			OS.AdjustWindowRectEx (rect, bits1, false, bits2);
+			adjustWindowRectEx(rect, bits1, false, bits2);
 			height = Math.max (height, rect.bottom - rect.top);
 		}
 	}
@@ -1577,6 +1568,49 @@ public void setAlpha (int alpha) {
 }
 
 @Override
+public Rectangle getBounds() {
+	checkWidget ();
+	return getDisplay().translateFromDisplayCoordinates(getBoundsInPixels(), getZoom());
+}
+
+@Override
+public Point getLocation() {
+	checkWidget ();
+	return getDisplay().translateFromDisplayCoordinates(getLocationInPixels(), getZoom());
+}
+
+@Override
+public void setLocation(Point location) {
+	if (location == null) error (SWT.ERROR_NULL_ARGUMENT);
+	checkWidget ();
+	Point locationInPixels = getDisplay().translateToDisplayCoordinates(location, getZoom());
+	setLocationInPixels(locationInPixels.x, locationInPixels.y);
+}
+
+@Override
+public void setLocation(int x, int y) {
+	setLocation(new Point(x, y));
+}
+
+@Override
+public void setBounds(Rectangle rect) {
+	if (rect == null) error (SWT.ERROR_NULL_ARGUMENT);
+	checkWidget ();
+	Rectangle boundsInPixels = getDisplay().translateToDisplayCoordinates(rect, getZoom());
+	// The scaling of the width and height in case of a monitor change is handled by
+	// the WM_DPICHANGED event processing. So to avoid duplicate scaling, we always
+	// have to scale width and height with the zoom of the original monitor (still
+	// returned by getZoom()) here.
+	setBoundsInPixels(boundsInPixels.x, boundsInPixels.y, DPIUtil.scaleUp(rect.width, getZoom()),
+			DPIUtil.scaleUp(rect.height, getZoom()));
+}
+
+@Override
+public void setBounds(int x, int y, int width, int height) {
+	setBounds(new Rectangle(x, y, width, height));
+}
+
+@Override
 void setBoundsInPixels (int x, int y, int width, int height, int flags, boolean defer) {
 	if (fullScreen) setFullScreen (false);
 	/*
@@ -1743,7 +1777,8 @@ public void setImeInputMode (int mode) {
  */
 public void setMaximumSize (int width, int height) {
 	checkWidget ();
-	setMaximumSizeInPixels(DPIUtil.autoScaleUp(width), DPIUtil.autoScaleUp(height));
+	int zoom = getZoom();
+	setMaximumSizeInPixels(DPIUtil.scaleUp(width, zoom), DPIUtil.scaleUp(height, zoom));
 }
 
 /**
@@ -1771,7 +1806,7 @@ public void setMaximumSize (int width, int height) {
 public void setMaximumSize (Point size) {
 	checkWidget ();
 	if (size == null) error (SWT.ERROR_NULL_ARGUMENT);
-	size = DPIUtil.autoScaleUp(size);
+	size = DPIUtil.scaleUp(size, getZoom());
 	setMaximumSizeInPixels(size.x, size.y);
 }
 
@@ -1779,14 +1814,14 @@ void setMaximumSizeInPixels (int width, int height) {
 	int widthLimit = 0, heightLimit = 0;
 	int trim = SWT.TITLE | SWT.CLOSE | SWT.MIN | SWT.MAX;
 	if ((style & SWT.NO_TRIM) == 0 && (style & trim) != 0) {
-		widthLimit = OS.GetSystemMetrics (OS.SM_CXMAXTRACK);
+		widthLimit = getSystemMetrics (OS.SM_CXMAXTRACK);
 		if ((style & SWT.RESIZE) != 0) {
-			heightLimit = OS.GetSystemMetrics (OS.SM_CYMAXTRACK);
+			heightLimit = getSystemMetrics (OS.SM_CYMAXTRACK);
 		} else {
 			RECT rect = new RECT ();
 			int bits1 = OS.GetWindowLong (handle, OS.GWL_STYLE);
 			int bits2 = OS.GetWindowLong (handle, OS.GWL_EXSTYLE);
-			OS.AdjustWindowRectEx (rect, bits1, false, bits2);
+			adjustWindowRectEx(rect, bits1, false, bits2);
 			heightLimit = rect.bottom - rect.top;
 		}
 	}
@@ -1817,21 +1852,22 @@ void setMaximumSizeInPixels (int width, int height) {
  */
 public void setMinimumSize (int width, int height) {
 	checkWidget ();
-	setMinimumSizeInPixels(DPIUtil.autoScaleUp(width), DPIUtil.autoScaleUp(height));
+	int zoom = getZoom();
+	setMinimumSizeInPixels(DPIUtil.scaleUp(width, zoom), DPIUtil.scaleUp(height, zoom));
 }
 
 void setMinimumSizeInPixels (int width, int height) {
 	int widthLimit = 0, heightLimit = 0;
 	int trim = SWT.TITLE | SWT.CLOSE | SWT.MIN | SWT.MAX;
 	if ((style & SWT.NO_TRIM) == 0 && (style & trim) != 0) {
-		widthLimit = OS.GetSystemMetrics (OS.SM_CXMINTRACK);
+		widthLimit = getSystemMetrics (OS.SM_CXMINTRACK);
 		if ((style & SWT.RESIZE) != 0) {
-			heightLimit = OS.GetSystemMetrics (OS.SM_CYMINTRACK);
+			heightLimit = getSystemMetrics (OS.SM_CYMINTRACK);
 		} else {
 			RECT rect = new RECT ();
 			int bits1 = OS.GetWindowLong (handle, OS.GWL_STYLE);
 			int bits2 = OS.GetWindowLong (handle, OS.GWL_EXSTYLE);
-			OS.AdjustWindowRectEx (rect, bits1, false, bits2);
+			adjustWindowRectEx(rect, bits1, false, bits2);
 			heightLimit = rect.bottom - rect.top;
 		}
 	}
@@ -1865,7 +1901,7 @@ void setMinimumSizeInPixels (int width, int height) {
 public void setMinimumSize (Point size) {
 	checkWidget ();
 	if (size == null) error (SWT.ERROR_NULL_ARGUMENT);
-	size = DPIUtil.autoScaleUp(size);
+	size = DPIUtil.scaleUp(size, getZoom());
 	setMinimumSizeInPixels(size.x, size.y);
 }
 
@@ -2268,6 +2304,37 @@ void overpaintMenuBorder () {
 	OS.ReleaseDC (handle, dc);
 }
 
+/**
+ * Fills the remaining area which are not painted by MenuBar and ClientArea
+ * inside the shell window.
+ */
+private void fillUnpaintedRegionInShellWindow() {
+	if (menuBar == null) return;
+	Rectangle clientArea = getClientRectInWindow();
+	Rectangle menuArea = menuBar.getBounds();
+	Rectangle windowBounds = getBoundsInPixels();
+	menuArea.x = menuArea.x - windowBounds.x;
+	menuArea.y = menuArea .y - windowBounds.y;
+	long windowRegion = OS.CreateRectRgn (0, 0, windowBounds.width, windowBounds.height);
+	long menuRegion = OS.CreateRectRgn (menuArea.x, menuArea.y, menuArea.x + menuArea.width, menuArea.y + menuArea.height);
+	long clientRegion = OS.CreateRectRgn (clientArea.x, clientArea.y, clientArea.x + clientArea.width, clientArea.y + clientArea.height);
+	OS.CombineRgn (windowRegion, windowRegion, menuRegion, OS.RGN_DIFF);
+	OS.CombineRgn (windowRegion, windowRegion, clientRegion, OS.RGN_DIFF);
+	OS.DeleteObject (menuRegion);
+	OS.DeleteObject (clientRegion);
+	int dwRop = display.useDarkModeExplorerTheme ? OS.BLACKNESS : OS.PATCOPY;
+	long dc = OS.GetWindowDC (handle);
+	POINT pt = null;
+	pt = new POINT();
+	OS.GetWindowOrgEx(dc, pt);
+	OS.OffsetRgn(windowRegion, -pt.x, -pt.y);
+	OS.SelectClipRgn(dc, windowRegion);
+	OS.OffsetRgn(windowRegion, pt.x, pt.y);
+	OS.PatBlt(dc, 0, 0, windowBounds.width, windowBounds.height, dwRop);
+	OS.DeleteObject (windowRegion);
+	OS.ReleaseDC (handle, dc);
+}
+
 @Override
 long windowProc (long hwnd, int msg, long wParam, long lParam) {
 	if (handle == 0) return 0;
@@ -2312,6 +2379,7 @@ long windowProc (long hwnd, int msg, long wParam, long lParam) {
 		{
 			long ret = super.windowProc (hwnd, msg, wParam, lParam);
 			overpaintMenuBorder();
+			fillUnpaintedRegionInShellWindow();
 			return ret;
 		}
 	}
@@ -2499,6 +2567,16 @@ LRESULT WM_NCHITTEST (long wParam, long lParam) {
 		if (hittest == OS.HTMENU) hittest = OS.HTBORDER;
 		return new LRESULT (hittest);
 	}
+	/*
+	 * In quarter zoom levels, sometimes the MenuItem in the MenuBar has more height
+	 * than the MenuBar, which leads to a gap between the client area and the menu
+	 * bar leaving it unpainted and unmanaged. On hovering over the MenuItem, it
+	 * leaves the gap area painted with remains of the MenuItem hover overlay. The
+	 * event WM_NCHITTEST is sent on hovering over MenuItem and hence the overlay
+	 * remains can be cleaned by calling
+	 * fillUnpaintedRegionBetweenMenuBarAndClientArea on this event.
+	 */
+	fillUnpaintedRegionInShellWindow();
 	return null;
 }
 
@@ -2582,7 +2660,7 @@ LRESULT WM_SETCURSOR (long wParam, long lParam) {
 				RECT rect = new RECT ();
 				OS.GetClientRect (handle, rect);
 				if (OS.PtInRect (rect, pt)) {
-					OS.SetCursor (cursor.handle);
+					OS.SetCursor (Cursor.win32_getHandle(cursor, getNativeZoom()));
 					switch (msg) {
 						case OS.WM_LBUTTONDOWN:
 						case OS.WM_RBUTTONDOWN:
@@ -2631,17 +2709,17 @@ LRESULT WM_WINDOWPOSCHANGING (long wParam, long lParam) {
 		lpwp.cx = Math.max (lpwp.cx, minWidth);
 		int trim = SWT.TITLE | SWT.CLOSE | SWT.MIN | SWT.MAX;
 		if ((style & SWT.NO_TRIM) == 0 && (style & trim) != 0) {
-			lpwp.cx = Math.max (lpwp.cx, OS.GetSystemMetrics (OS.SM_CXMINTRACK));
+			lpwp.cx = Math.max (lpwp.cx, getSystemMetrics (OS.SM_CXMINTRACK));
 		}
 		lpwp.cy = Math.max (lpwp.cy, minHeight);
 		if ((style & SWT.NO_TRIM) == 0 && (style & trim) != 0) {
 			if ((style & SWT.RESIZE) != 0) {
-				lpwp.cy = Math.max (lpwp.cy, OS.GetSystemMetrics (OS.SM_CYMINTRACK));
+				lpwp.cy = Math.max (lpwp.cy, getSystemMetrics (OS.SM_CYMINTRACK));
 			} else {
 				RECT rect = new RECT ();
 				int bits1 = OS.GetWindowLong (handle, OS.GWL_STYLE);
 				int bits2 = OS.GetWindowLong (handle, OS.GWL_EXSTYLE);
-				OS.AdjustWindowRectEx (rect, bits1, false, bits2);
+				adjustWindowRectEx(rect, bits1, false, bits2);
 				lpwp.cy = Math.max (lpwp.cy, rect.bottom - rect.top);
 			}
 		}
@@ -2650,20 +2728,24 @@ LRESULT WM_WINDOWPOSCHANGING (long wParam, long lParam) {
 	return result;
 }
 
-/**
- * The native zoom in % of the standard resolution the shell is scaled for
- */
-int getNativeZoom() {
-	return nativeZoom;
-}
-
-void setNativeZoom(int nativeZoom) {
-	this.nativeZoom = nativeZoom;
-}
-
-private void handleZoomEvent(Event event) {
-	float scalingFactor = 1f * event.detail / getZoom();
-	DPIZoomChangeRegistry.applyChange(this, event.detail, scalingFactor);
+@Override
+LRESULT WM_WINDOWPOSCHANGED (long wParam, long lParam) {
+	LRESULT result = super.WM_WINDOWPOSCHANGED(wParam, lParam);
+	// When the process is started with System DPI awareness and
+	// only the thread is PerMonitorV2 aware, there are some scenarios, when the
+	// OS does not send a DPI change event when a child Shell is positioned and
+	// opened on another monitor as its parent Shell. To work around that limitation
+	// this check is added to trigger a dpi change event if an unexpected DPI value is
+	// detected.
+	if (display.isRescalingAtRuntime()) {
+		int dpiForWindow = DPIUtil.mapDPIToZoom(OS.GetDpiForWindow(getShell().handle));
+		if (dpiForWindow != nativeZoom) {
+			WINDOWPOS lpwp = new WINDOWPOS ();
+			OS.MoveMemory (lpwp, lParam, WINDOWPOS.sizeof);
+			handleMonitorSpecificDpiChange(dpiForWindow, new Rectangle(lpwp.x, lpwp.y, lpwp.cx, lpwp.cy));
+		}
+	}
+	return result;
 }
 
 private static void handleDPIChange(Widget widget, int newZoom, float scalingFactor) {

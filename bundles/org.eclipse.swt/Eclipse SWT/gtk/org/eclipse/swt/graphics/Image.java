@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corporation and others.
+ * Copyright (c) 2000, 2025 IBM Corporation and others.
  *
  * This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License 2.0
@@ -14,13 +14,17 @@
 package org.eclipse.swt.graphics;
 
 
+import static org.eclipse.swt.internal.image.ImageColorTransformer.DEFAULT_DISABLED_IMAGE_TRANSFORMER;
+
 import java.io.*;
+import java.util.*;
 
 import org.eclipse.swt.*;
 import org.eclipse.swt.internal.*;
 import org.eclipse.swt.internal.DPIUtil.*;
 import org.eclipse.swt.internal.cairo.*;
 import org.eclipse.swt.internal.gtk.*;
+import org.eclipse.swt.internal.image.*;
 
 /**
  * Instances of this class are graphics which have been prepared
@@ -152,6 +156,11 @@ public final class Image extends Resource implements Drawable {
 	private ImageDataProvider imageDataProvider;
 
 	/**
+	 * ImageGcDrawer to provide a callback to draw on a GC for various zoom levels
+	 */
+	private ImageGcDrawer imageGcDrawer;
+
+	/**
 	 * Style flag used to differentiate normal, gray-scale and disabled images based
 	 * on image data providers. Without this, a normal and a disabled image of the
 	 * same image data provider would be considered equal.
@@ -263,6 +272,7 @@ public Image(Device device, Image srcImage, int flag) {
 	this.type = srcImage.type;
 	this.imageDataProvider = srcImage.imageDataProvider;
 	this.imageFileNameProvider = srcImage.imageFileNameProvider;
+	this.imageGcDrawer = srcImage.imageGcDrawer;
 	this.styleFlag = srcImage.styleFlag | flag;
 	this.currentDeviceZoom = srcImage.currentDeviceZoom;
 
@@ -275,7 +285,7 @@ public Image(Device device, Image srcImage, int flag) {
 	boolean hasAlpha = format == Cairo.CAIRO_FORMAT_ARGB32;
 	surface = Cairo.cairo_image_surface_create(format, width, height);
 	if (surface == 0) SWT.error(SWT.ERROR_NO_HANDLES);
-	if (DPIUtil.getDeviceZoom() != currentDeviceZoom && DPIUtil.useCairoAutoScale()) {
+	if (DPIUtil.getDeviceZoom() != currentDeviceZoom) {
 		double scaleFactor = DPIUtil.getDeviceZoom() / 100f;
 		Cairo.cairo_surface_set_device_scale(surface, scaleFactor, scaleFactor);
 	}
@@ -299,15 +309,30 @@ public Image(Device device, Image srcImage, int flag) {
 				byte[] line = new byte[stride];
 				for (int y=0; y<height; y++) {
 					C.memmove(line, data + (y * stride), stride);
-					for (int x=0, offset=0; x<width; x++, offset += 4) {
+					for (int x = 0, offset = 0; x < width; x++, offset += 4) {
 						int a = line[offset + oa] & 0xFF;
 						int r = line[offset + or] & 0xFF;
 						int g = line[offset + og] & 0xFF;
 						int b = line[offset + ob] & 0xFF;
-						line[offset + oa] = (byte) Math.round((double) a * 0.5);
-						line[offset + or] = (byte) Math.round((double) r * 0.5);
-						line[offset + og] = (byte) Math.round((double) g * 0.5);
-						line[offset + ob] = (byte) Math.round((double) b * 0.5);
+						// The alpha value is embedded into the RGB values as well, so extract it out
+						// of those values for transformation and reapply it afterwards
+						// Note: don't change execution order, e.g., using *= assignment, as this is
+						// integer arithmetics
+						if (hasAlpha && a != 0) {
+							r = r * 255 / a;
+							g = g * 255 / a;
+							b = b * 255 / a;
+						}
+						RGBA result = DEFAULT_DISABLED_IMAGE_TRANSFORMER.adaptPixelValue(r, g, b, a);
+						if (hasAlpha) {
+							result.rgb.red = result.rgb.red * result.alpha / 255;
+							result.rgb.green = result.rgb.green * result.alpha / 255;
+							result.rgb.blue = result.rgb.blue * result.alpha / 255;
+						}
+						line[offset + oa] = (byte) result.alpha;
+						line[offset + or] = (byte) result.rgb.red;
+						line[offset + og] = (byte) result.rgb.green;
+						line[offset + ob] = (byte) result.rgb.blue;
 					}
 					C.memmove(data + (y * stride), line, stride);
 				}
@@ -378,7 +403,10 @@ public Image(Device device, Image srcImage, int flag) {
  * </ul>
  *
  * @see #dispose()
+ *
+ * @deprecated use {@link Image#Image(Device, int, int)} instead
  */
+@Deprecated(since = "2025-06", forRemoval = true)
 public Image(Device device, Rectangle bounds) {
 	super(device);
 	if (bounds == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
@@ -412,11 +440,14 @@ public Image(Device device, Rectangle bounds) {
  * @see #dispose()
  */
 public Image(Device device, ImageData data) {
+	this(device, DPIUtil.autoScaleUp(device, data), DPIUtil.getDeviceZoom());
+}
+
+private Image(Device device, ImageData data, int zoom) {
 	super(device);
 	if (data == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
-	currentDeviceZoom = DPIUtil.getDeviceZoom();
-	data = DPIUtil.autoScaleUp (device, data);
-	init(data);
+	currentDeviceZoom = zoom;
+	init(data, zoom);
 	init();
 }
 
@@ -523,9 +554,9 @@ public Image(Device device, ImageData source, ImageData mask) {
  */
 public Image(Device device, InputStream stream) {
 	super(device);
-	ImageData data = new ImageData(stream);
 	currentDeviceZoom = DPIUtil.getDeviceZoom();
-	data = DPIUtil.autoScaleUp (device, data);
+	ElementAtZoom<ImageData> image = ImageDataLoader.load(stream, FileFormat.DEFAULT_ZOOM, currentDeviceZoom);
+	ImageData data = DPIUtil.scaleImageData(device, image, currentDeviceZoom);
 	init(data);
 	init();
 }
@@ -565,10 +596,9 @@ public Image(Device device, InputStream stream) {
 public Image(Device device, String filename) {
 	super(device);
 	if (filename == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
-
-	ImageData data = new ImageData(filename);
 	currentDeviceZoom = DPIUtil.getDeviceZoom();
-	data = DPIUtil.autoScaleUp (device, data);
+	ElementAtZoom<ImageData> image = ImageDataLoader.load(filename, FileFormat.DEFAULT_ZOOM, currentDeviceZoom);
+	ImageData data = DPIUtil.scaleImageData(device, image, currentDeviceZoom);
 	init(data);
 	init();
 }
@@ -606,19 +636,7 @@ public Image(Device device, ImageFileNameProvider imageFileNameProvider) {
 	super(device);
 	this.imageFileNameProvider = imageFileNameProvider;
 	currentDeviceZoom = DPIUtil.getDeviceZoom();
-	ElementAtZoom<String> filename = DPIUtil.validateAndGetImagePathAtZoom (imageFileNameProvider, currentDeviceZoom);
-	if (filename.zoom() == currentDeviceZoom) {
-		initNative (filename.element());
-
-		if (this.surface == 0) {
-			ImageData data = new ImageData(filename.element());
-			init(data);
-		}
-	} else {
-		ImageData imageData = new ImageData (filename.element());
-		ImageData resizedData = DPIUtil.autoScaleImageData (device, imageData, filename.zoom());
-		init(resizedData);
-	}
+	initFromFileNameProvider(currentDeviceZoom);
 	init ();
 }
 
@@ -655,9 +673,37 @@ public Image(Device device, ImageDataProvider imageDataProvider) {
 	super(device);
 	this.imageDataProvider = imageDataProvider;
 	currentDeviceZoom = DPIUtil.getDeviceZoom();
-	ElementAtZoom<ImageData> data =  DPIUtil.validateAndGetImageDataAtZoom(imageDataProvider, currentDeviceZoom);
-	ImageData resizedData = DPIUtil.autoScaleImageData(device, data.element(), data.zoom());
-	init (resizedData);
+	initFromImageDataProvider(currentDeviceZoom);
+	init ();
+}
+
+/**
+ * The provided ImageGcDrawer will be called on demand whenever a new variant of the
+ * Image for an additional zoom is required. Depending on the OS-specific implementation
+ * these calls will be done during the instantiation or later when a new variant is
+ * requested.
+ *
+ * @param device the device on which to create the image
+ * @param imageGcDrawer the ImageGcDrawer object to be called when a new image variant
+ * for another zoom is required.
+ * @param width the width of the new image in points
+ * @param height the height of the new image in points
+ *
+ * @exception IllegalArgumentException <ul>
+ *    <li>ERROR_NULL_ARGUMENT - if device is null and there is no current device</li>
+ *    <li>ERROR_NULL_ARGUMENT - if the ImageGcDrawer is null</li>
+ * </ul>
+ * @since 3.129
+ */
+public Image(Device device, ImageGcDrawer imageGcDrawer, int width, int height) {
+	super(device);
+	if (imageGcDrawer == null) {
+		SWT.error(SWT.ERROR_NULL_ARGUMENT);
+	}
+	this.imageGcDrawer = imageGcDrawer;
+	currentDeviceZoom = 100;
+	ImageData imageData = drawWithImageGcDrawer(width, height, currentDeviceZoom);
+	init (imageData, currentDeviceZoom);
 	init ();
 }
 
@@ -687,53 +733,33 @@ boolean refreshImageForZoom () {
 	if (imageFileNameProvider != null) {
 		int deviceZoomLevel = deviceZoom;
 		if (deviceZoomLevel != currentDeviceZoom) {
-			ElementAtZoom<String> filename = DPIUtil.validateAndGetImagePathAtZoom (imageFileNameProvider, deviceZoomLevel);
-			/* Avoid re-creating the fall-back image, when current zoom is already 100% */
-			if (filename.zoom() == deviceZoomLevel) {
-				/* Release current native resources */
-				destroy ();
-				initNative(filename.element());
-				if (this.surface == 0) {
-					ImageData data = new ImageData(filename.element());
-					init(data);
-				}
-				init ();
-				refreshed = true;
-			} else {
-				/* Release current native resources */
-				destroy ();
-				ImageData imageData = new ImageData (filename.element());
-				ImageData resizedData = DPIUtil.autoScaleImageData (device, imageData, filename.zoom());
-				init(resizedData);
-				init ();
-				refreshed = true;
-			}
+			/* Release current native resources */
+			destroy ();
+			initFromFileNameProvider(deviceZoomLevel);
+			init ();
+			refreshed = true;
 			currentDeviceZoom = deviceZoomLevel;
 		}
 	} else if (imageDataProvider != null) {
 		int deviceZoomLevel = deviceZoom;
 		if (deviceZoomLevel != currentDeviceZoom) {
-			ElementAtZoom<ImageData> data = DPIUtil.validateAndGetImageDataAtZoom (imageDataProvider, deviceZoomLevel);
 			/* Release current native resources */
 			destroy ();
-			ImageData resizedData = DPIUtil.autoScaleImageData (device, data.element(), data.zoom());
-			init(resizedData);
+			initFromImageDataProvider(deviceZoomLevel);
 			init();
 			refreshed = true;
 			currentDeviceZoom = deviceZoomLevel;
 		}
-	} else {
-		if (!DPIUtil.useCairoAutoScale()) {
-			int deviceZoomLevel = deviceZoom;
-			if (deviceZoomLevel != currentDeviceZoom) {
-				ImageData data = getImageDataAtCurrentZoom();
-				destroy ();
-				ImageData resizedData = DPIUtil.autoScaleImageData(device, data, deviceZoomLevel, currentDeviceZoom);
-				init(resizedData);
-				init();
-				refreshed = true;
-				currentDeviceZoom = deviceZoomLevel;
-			}
+	} else if (imageGcDrawer != null) {
+		int deviceZoomLevel = deviceZoom;
+		if (deviceZoomLevel != currentDeviceZoom) {
+			ImageData data = drawWithImageGcDrawer(width, height, deviceZoomLevel);
+			/* Release current native resources */
+			destroy ();
+			init(data);
+			init();
+			refreshed = true;
+			currentDeviceZoom = deviceZoomLevel;
 		}
 	}
 	return refreshed;
@@ -751,6 +777,27 @@ void initNative(String filename) {
 			}
 		}
 	} catch (SWTException e) {}
+}
+
+private void initFromFileNameProvider(int zoom) {
+	ElementAtZoom<String> fileForZoom = DPIUtil.validateAndGetImagePathAtZoom (imageFileNameProvider, zoom);
+	if (fileForZoom.zoom() == zoom) {
+		initNative(fileForZoom.element());
+	}
+	if (this.surface == 0) {
+		ElementAtZoom<ImageData> imageDataAtZoom = ImageDataLoader.load(fileForZoom.element(), fileForZoom.zoom(), zoom);
+		ImageData imageData = imageDataAtZoom.element();
+		if (imageDataAtZoom.zoom() != zoom) {
+			imageData = DPIUtil.scaleImageData(device, imageDataAtZoom, zoom);
+		}
+		init(imageData);
+	}
+}
+
+private void initFromImageDataProvider(int zoom) {
+	ElementAtZoom<ImageData> data = DPIUtil.validateAndGetImageDataAtZoom (imageDataProvider, zoom);
+	ImageData resizedData = DPIUtil.scaleImageData (device, data.element(), zoom, data.zoom());
+	init(resizedData);
 }
 
 void createFromPixbuf(int type, long pixbuf) {
@@ -772,7 +819,7 @@ void createFromPixbuf(int type, long pixbuf) {
 	// Initialize surface with dimensions received from the pixbuf and set device_scale appropriately
 	surface = Cairo.cairo_image_surface_create(format, pixbufWidth, pixbufHeight);
 	if (surface == 0) SWT.error(SWT.ERROR_NO_HANDLES);
-	if (DPIUtil.useCairoAutoScale()) Cairo.cairo_surface_set_device_scale(surface, scaleFactor, scaleFactor);
+	Cairo.cairo_surface_set_device_scale(surface, scaleFactor, scaleFactor);
 
 	long data = Cairo.cairo_image_surface_get_data(surface);
 	int cairoStride = Cairo.cairo_image_surface_get_stride(surface);
@@ -904,6 +951,9 @@ public boolean equals (Object object) {
 		return (styleFlag == image.styleFlag) && imageDataProvider.equals (image.imageDataProvider);
 	} else if (imageFileNameProvider != null && image.imageFileNameProvider != null) {
 		return (styleFlag == image.styleFlag) && imageFileNameProvider.equals (image.imageFileNameProvider);
+	} else if (imageGcDrawer != null && image.imageGcDrawer != null) {
+		return styleFlag == image.styleFlag && imageGcDrawer.equals(image.imageGcDrawer) && width == image.width
+				&& height == image.height;
 	} else {
 		return surface == image.surface;
 	}
@@ -1106,12 +1156,37 @@ public ImageData getImageData (int zoom) {
 		return getImageDataAtCurrentZoom();
 	} else if (imageDataProvider != null) {
 		ElementAtZoom<ImageData> data = DPIUtil.validateAndGetImageDataAtZoom (imageDataProvider, zoom);
-		return DPIUtil.autoScaleImageData (device, data.element(), zoom, data.zoom());
+		return DPIUtil.scaleImageData (device, data.element(), zoom, data.zoom());
 	} else if (imageFileNameProvider != null) {
 		ElementAtZoom<String> fileName = DPIUtil.validateAndGetImagePathAtZoom (imageFileNameProvider, zoom);
-		return DPIUtil.autoScaleImageData (device, new ImageData (fileName.element()), zoom, fileName.zoom());
+		return DPIUtil.scaleImageData (device, new ImageData (fileName.element()), zoom, fileName.zoom());
+	} else if (imageGcDrawer != null) {
+		return drawWithImageGcDrawer(width, height, zoom);
 	} else {
-		return DPIUtil.autoScaleImageData (device, getImageDataAtCurrentZoom (), zoom, currentDeviceZoom);
+		return DPIUtil.scaleImageData (device, getImageDataAtCurrentZoom (), zoom, currentDeviceZoom);
+	}
+}
+
+private ImageData drawWithImageGcDrawer(int width, int height, int zoom) {
+	int gcStyle = imageGcDrawer.getGcStyle();
+	Image image;
+	if ((gcStyle & SWT.TRANSPARENT) != 0) {
+		/* Create a 24 bit image data with alpha channel */
+		final ImageData resultData = new ImageData(width, height, 24, new PaletteData (0xFF, 0xFF00, 0xFF0000));
+		resultData.alphaData = new byte [width * height];
+		image = new Image(device, resultData, zoom);
+	} else {
+		image = new Image(device, width, height);
+	}
+	GC gc = new GC(image, gcStyle);
+	try {
+		imageGcDrawer.drawOn(gc, width, height);
+		ImageData imageData = image.getImageData(zoom);
+		imageGcDrawer.postProcess(imageData);
+		return imageData;
+	} finally {
+		gc.dispose();
+		image.dispose();
 	}
 }
 
@@ -1179,6 +1254,8 @@ public int hashCode () {
 		return imageDataProvider.hashCode();
 	} else if (imageFileNameProvider != null) {
 		return imageFileNameProvider.hashCode();
+	} else if (imageGcDrawer != null) {
+		return Objects.hash(imageGcDrawer, width, height);
 	} else {
 		return (int)surface;
 	}
@@ -1199,12 +1276,8 @@ void init(int width, int height) {
 	if (surface == 0) SWT.error(SWT.ERROR_NO_HANDLES);
 	// When we create a blank image we need to set it to 100 in GTK3 as we draw using 100% scale.
 	// Cairo will take care of scaling for us when image needs to be scaled.
-	if (DPIUtil.useCairoAutoScale()) {
-		currentDeviceZoom = 100;
-		Cairo.cairo_surface_set_device_scale(surface, 1f, 1f);
-	} else {
-		currentDeviceZoom = DPIUtil.getDeviceZoom();
-	}
+	currentDeviceZoom = 100;
+	Cairo.cairo_surface_set_device_scale(surface, 1f, 1f);
 	long cairo = Cairo.cairo_create(surface);
 	if (cairo == 0) SWT.error(SWT.ERROR_NO_HANDLES);
 	Cairo.cairo_set_source_rgb(cairo, 1, 1, 1);
@@ -1216,6 +1289,10 @@ void init(int width, int height) {
 }
 
 void init(ImageData image) {
+	init(image, DPIUtil.getDeviceZoom());
+}
+
+private void init(ImageData image, int zoom) {
 	if (image == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
 
 	PaletteData palette = image.palette;
@@ -1228,7 +1305,7 @@ void init(ImageData image) {
 	int imageDataHeight = image.height;
 
 	// Scale dimensions of Image object to 100% scale factor
-	double scaleFactor = DPIUtil.getDeviceZoom() / 100f;
+	double scaleFactor = zoom / 100f;
 	this.width = (int) Math.round(imageDataWidth / scaleFactor);
 	this.height = (int) Math.round(imageDataHeight / scaleFactor);
 
@@ -1238,7 +1315,7 @@ void init(ImageData image) {
 	// Initialize surface with dimensions received from the ImageData and set device_scale appropriately
 	surface = Cairo.cairo_image_surface_create(format, imageDataWidth, imageDataHeight);
 	if (surface == 0) SWT.error(SWT.ERROR_NO_HANDLES);
-	if (DPIUtil.useCairoAutoScale()) Cairo.cairo_surface_set_device_scale(surface, scaleFactor, scaleFactor);
+	Cairo.cairo_surface_set_device_scale(surface, scaleFactor, scaleFactor);
 
 	int stride = Cairo.cairo_image_surface_get_stride(surface);
 	long data = Cairo.cairo_image_surface_get_data(surface);
@@ -1391,8 +1468,8 @@ public long internal_new_GC (GCData data) {
 			}
 		}
 		data.device = device;
-		data.foregroundRGBA = device.COLOR_BLACK.handle;
-		data.backgroundRGBA = device.COLOR_WHITE.handle;
+		data.foregroundRGBA = Device.COLOR_BLACK.handle;
+		data.backgroundRGBA = Device.COLOR_WHITE.handle;
 		data.font = device.systemFont;
 		data.image = this;
 	}
@@ -1491,6 +1568,29 @@ public String toString () {
 	}
 
 	return "Image {" + surface + "}";
+}
+
+/**
+ * <b>IMPORTANT:</b> This method is not part of the public
+ * API for Image. It is marked public only so that it
+ * can be shared within the packages provided by SWT.
+ *
+ * Draws a scaled image using the GC by another image.
+ *
+ * @param gc the GC to draw on the resulting image
+ * @param original the image which is supposed to be scaled and drawn on the resulting image
+ * @param width the width of the original image
+ * @param height the height of the original image
+ * @param scaleFactor the factor with which the image is supposed to be scaled
+ *
+ * @noreference This method is not intended to be referenced by clients.
+ */
+public static void drawScaled(GC gc, Image original, int width, int height, float scaleFactor) {
+	gc.drawImage (original, 0, 0, DPIUtil.autoScaleDown (width), DPIUtil.autoScaleDown (height),
+			/* E.g. destWidth here is effectively DPIUtil.autoScaleDown (scaledWidth), but avoiding rounding errors.
+			 * Nevertheless, we still have some rounding errors due to the point-based API GC#drawImage(..).
+			 */
+			0, 0, Math.round (DPIUtil.autoScaleDown (width * scaleFactor)), Math.round (DPIUtil.autoScaleDown (height * scaleFactor)));
 }
 
 }

@@ -358,7 +358,7 @@ void createItem (MenuItem item, int index) {
 	info.fMask = OS.MIIM_ID | OS.MIIM_TYPE | OS.MIIM_DATA;
 	info.wID = item.id;
 	info.dwItemData = item.id;
-	info.fType = item.widgetStyle ();
+	info.fType = (style & SWT.BAR) != 0 && needsMenuCallback() ? OS.MFT_OWNERDRAW :  item.widgetStyle ();
 	info.dwTypeData = pszText;
 	boolean success = OS.InsertMenuItem (handle, index, true, info);
 	if (pszText != 0) OS.HeapFree (hHeap, 0, pszText);
@@ -430,6 +430,7 @@ void fixMenus (Decorations newParent) {
 	parent.removeMenu (this);
 	newParent.addMenu (this);
 	this.parent = newParent;
+	this.nativeZoom = newParent.nativeZoom;
 }
 
 /**
@@ -1187,8 +1188,7 @@ public void setEnabled (boolean enabled) {
  * </ul>
  */
 public void setLocation (int x, int y) {
-	checkWidget ();
-	setLocationInPixels(DPIUtil.autoScaleUp(x), DPIUtil.autoScaleUp(y));
+	setLocation(new Point(x, y));
 }
 
 void setLocationInPixels (int x, int y) {
@@ -1225,8 +1225,8 @@ void setLocationInPixels (int x, int y) {
 public void setLocation (Point location) {
 	checkWidget ();
 	if (location == null) error (SWT.ERROR_NULL_ARGUMENT);
-	location = DPIUtil.autoScaleUp(location);
-	setLocationInPixels(location.x, location.y);
+	Point locationInPixels = getDisplay().translateToDisplayCoordinates(location, getZoom());
+	setLocationInPixels(locationInPixels.x, locationInPixels.y);
 }
 
 /**
@@ -1319,7 +1319,7 @@ void updateBackground () {
 	hBrush = 0;
 
 	if (backgroundImage != null)
-		hBrush = OS.CreatePatternBrush (backgroundImage.handle);
+		hBrush = OS.CreatePatternBrush (Image.win32_getHandle(backgroundImage, getZoom()));
 	else if (background != -1)
 		hBrush = OS.CreateSolidBrush (background);
 
@@ -1349,11 +1349,11 @@ LRESULT wmTimer (long wParam, long lParam) {
 		OS.GetCursorPos (pt);
 		if (selectedMenuItem != null && selectedMenuItem.parent != null) {
 			RECT rect = new RECT ();
-			boolean success = OS.GetMenuItemRect (0, selectedMenuItem.parent.handle, selectedMenuItem.index, rect);
+			boolean success = OS.GetMenuItemRect (0, selectedMenuItem.parent.handle, indexOf(selectedMenuItem), rect);
 			if (!success) return null;
 			if (OS.PtInRect (rect, pt)) {
 				// Mouse cursor is within the bounds of menu item
-				selectedMenuItem.showTooltip (pt.x, pt.y + OS.GetSystemMetrics(OS.SM_CYCURSOR) / 2 + 5);
+				selectedMenuItem.showTooltip (pt.x, pt.y + getSystemMetrics(OS.SM_CYCURSOR) / 2 + 5);
 			} else {
 				/*
 				 * Mouse cursor is outside the bounds of the menu item:

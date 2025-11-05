@@ -14,10 +14,14 @@
 package org.eclipse.swt.graphics;
 
 
+import java.util.*;
+import java.util.concurrent.*;
+
 import org.eclipse.swt.*;
 import org.eclipse.swt.internal.*;
 import org.eclipse.swt.internal.gdip.*;
 import org.eclipse.swt.internal.win32.*;
+import org.eclipse.swt.widgets.*;
 
 /**
  * This class is the abstract superclass of all device objects,
@@ -28,6 +32,8 @@ import org.eclipse.swt.internal.win32.*;
  * @see <a href="http://www.eclipse.org/swt/">Sample code and further information</a>
  */
 public abstract class Device implements Drawable {
+
+	static boolean strictChecks = System.getProperty("org.eclipse.swt.internal.enableStrictChecks") != null;
 
 	/* Debugging */
 	public static boolean DEBUG;
@@ -55,9 +61,7 @@ public abstract class Device implements Drawable {
 	String[] loadedFonts;
 
 	volatile boolean disposed;
-
-	/* Auto-Scaling*/
-	boolean enableAutoScaling = true;
+	private Set<Resource> resourcesWithZoomSupport  = ConcurrentHashMap.newKeySet();
 
 	/*
 	* TEMPORARY CODE. When a graphics object is
@@ -256,20 +260,33 @@ void checkGDIP() {
 protected void create (DeviceData data) {
 }
 
-int computePixels(float height) {
+int computePixels(float height, int zoom) {
 	long hDC = internal_new_GC (null);
-	int pixels = -(int)(0.5f + (height * OS.GetDeviceCaps(hDC, OS.LOGPIXELSY) / 72f));
+	int pixels = -(int)(0.5f + (height / calculateFontConversionFactor(hDC, zoom)));
 	internal_dispose_GC (hDC, null);
 	return pixels;
 }
 
 float computePoints(LOGFONT logFont, long hFont) {
-	return computePoints(logFont, hFont, -1);
+	return computePoints(logFont, hFont, SWT.DEFAULT);
 }
 
-float computePoints(LOGFONT logFont, long hFont, int currentFontDPI) {
+private float calculateFontConversionFactor(long hDC, int zoom) {
+	float conversionFactor = 72f;
+	if (isAutoScalable() && zoom != SWT.DEFAULT) {
+		// For auto scalable devices we need to use a dynamic
+		// DPI value that is extracted from the zoom
+		conversionFactor /= DPIUtil.mapZoomToDPI(zoom);
+	} else {
+		conversionFactor /= OS.GetDeviceCaps(hDC, OS.LOGPIXELSY);
+	}
+	return conversionFactor;
+}
+
+float computePoints(LOGFONT logFont, long hFont, int zoom) {
 	long hDC = internal_new_GC (null);
-	int logPixelsY = OS.GetDeviceCaps(hDC, OS.LOGPIXELSY);
+
+	float conversionFactor = calculateFontConversionFactor(hDC, zoom);
 	int pixels = 0;
 	if (logFont.lfHeight > 0) {
 		/*
@@ -288,14 +305,7 @@ float computePoints(LOGFONT logFont, long hFont, int currentFontDPI) {
 		pixels = -logFont.lfHeight;
 	}
 	internal_dispose_GC (hDC, null);
-	float adjustedZoomFactor = 1.0f;
-	if (currentFontDPI > 0) {
-		// as Device::computePoints will always return point on the basis of the
-		// primary monitor zoom, a custom zoomFactor must be calculated if the font
-		// is used for a different zoom level
-		adjustedZoomFactor *= (float) logPixelsY / (float) currentFontDPI;
-	}
-	return adjustedZoomFactor * pixels * 72f / logPixelsY;
+	return pixels * conversionFactor;
 }
 
 /**
@@ -410,7 +420,7 @@ long EnumFontFamProc (long lpelfe, long lpntme, long FontType, long lParam) {
  */
 public Rectangle getBounds() {
 	checkDevice ();
-	return DPIUtil.autoScaleDown(getBoundsInPixels());
+	return DPIUtil.scaleDown(getBoundsInPixels(), getDeviceZoom());
 }
 
 private Rectangle getBoundsInPixels () {
@@ -517,7 +527,7 @@ public Point getDPI () {
 	int dpiX = OS.GetDeviceCaps (hDC, OS.LOGPIXELSX);
 	int dpiY = OS.GetDeviceCaps (hDC, OS.LOGPIXELSY);
 	internal_dispose_GC (hDC, null);
-	return DPIUtil.autoScaleDown(new Point (dpiX, dpiY));
+	return DPIUtil.scaleDown(new Point (dpiX, dpiY), DPIUtil.getZoomForAutoscaleProperty(getDeviceZoom()));
 }
 
 /**
@@ -917,6 +927,8 @@ protected void release () {
 		Gdip.GdiplusShutdown (gdipToken[0]);
 	}
 	SWTFontProvider.disposeFontRegistry(this);
+	resourcesWithZoomSupport.clear();
+	resourcesWithZoomSupport = null;
 	gdipToken = null;
 	scripts = null;
 	logFonts = null;
@@ -939,14 +951,6 @@ public void setWarnings (boolean warnings) {
 	checkDevice ();
 }
 
-boolean getEnableAutoScaling() {
-	return enableAutoScaling;
-}
-
-void setEnableAutoScaling(boolean value) {
-	enableAutoScaling = value;
-}
-
 /**
  * Gets the scaling factor from the device and calculates the zoom level.
  * @return zoom in percentage
@@ -957,5 +961,29 @@ void setEnableAutoScaling(boolean value) {
  */
 protected int getDeviceZoom () {
 	return DPIUtil.mapDPIToZoom ( _getDPIx ());
+}
+
+void registerResourceWithZoomSupport(Resource resource) {
+	resourcesWithZoomSupport.add(resource);
+}
+
+void deregisterResourceWithZoomSupport(Resource resource) {
+	resourcesWithZoomSupport.remove(resource);
+}
+
+/**
+ * Destroys the handles of all the resources in the resource tracker by
+ * identifying the zoom levels which is not valid for any monitor
+ *
+ * @noreference This method is not intended to be referenced by clients.
+ */
+public static void win32_destroyUnusedHandles(Display display) {
+	Set<Integer> availableZoomLevels = new HashSet<>();
+	for (Monitor monitor : display.getMonitors()) {
+	    availableZoomLevels.add(DPIUtil.getZoomForAutoscaleProperty(monitor.getZoom()));
+	}
+	for (Resource resource: ((Device) display).resourcesWithZoomSupport) {
+		resource.destroyHandlesExcept(availableZoomLevels);
+	}
 }
 }

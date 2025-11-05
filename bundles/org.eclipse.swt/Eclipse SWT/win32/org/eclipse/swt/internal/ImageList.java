@@ -14,6 +14,8 @@
 package org.eclipse.swt.internal;
 
 
+import java.util.*;
+
 import org.eclipse.swt.*;
 import org.eclipse.swt.graphics.*;
 import org.eclipse.swt.internal.win32.*;
@@ -22,17 +24,27 @@ public class ImageList {
 	long handle;
 	int style, refCount;
 	Image [] images;
+	private final int zoom;
+	private final int width, height;
+	private final int flags;
 
-public ImageList (int style) {
-	this (style, 32, 32);
+	private HashMap<Integer, Long> zoomToHandle = new HashMap<>();
+
+public ImageList (int style, int zoom) {
+	this (style, 32, 32, zoom);
 }
 
-public ImageList (int style, int width, int height) {
+public ImageList (int style, int width, int height, int zoom) {
 	this.style = style;
-	int flags = OS.ILC_MASK | OS.ILC_COLOR32;
-	if ((style & SWT.RIGHT_TO_LEFT) != 0) flags |= OS.ILC_MIRROR;
-	handle = OS.ImageList_Create (width, height, flags, 16, 16);
+	int listFlags = OS.ILC_MASK | OS.ILC_COLOR32;
+	if ((style & SWT.RIGHT_TO_LEFT) != 0) listFlags |= OS.ILC_MIRROR;
+	this.flags = listFlags;
+	this.height = height;
+	this.width = width;
+	handle = OS.ImageList_Create (width, height, this.flags, 16, 16);
+	zoomToHandle.put(zoom, handle);
 	images = new Image [4];
+	this.zoom = zoom;
 }
 
 public int add (Image image) {
@@ -46,10 +58,10 @@ public int add (Image image) {
 		index++;
 	}
 	if (count == 0) {
-		Rectangle rect = image.getBoundsInPixels();
+		Rectangle rect = DPIUtil.scaleBounds(image.getBounds(), zoom, 100);
 		OS.ImageList_SetIconSize (handle, rect.width, rect.height);
 	}
-	set (index, image, count);
+	setForAllHandles(index, image, count);
 	if (index == images.length) {
 		Image [] newImages = new Image [images.length + 4];
 		System.arraycopy (images, 0, newImages, 0, images.length);
@@ -318,8 +330,33 @@ public int getStyle () {
 	return style;
 }
 
-public long getHandle () {
-	return handle;
+public long getHandle(int targetZoom) {
+	if (!zoomToHandle.containsKey(targetZoom)) {
+		int scaledWidth = DPIUtil.scaleUp(DPIUtil.scaleDown(width, this.zoom), targetZoom);
+		int scaledHeight = DPIUtil.scaleUp(DPIUtil.scaleDown(height, this.zoom), targetZoom);
+		long newImageListHandle = OS.ImageList_Create(scaledWidth, scaledHeight, flags, 16, 16);
+		int count = OS.ImageList_GetImageCount (handle);
+		for (int i = 0; i < count; i++) {
+			Image image = images[i];
+			if (image != null) {
+				set(i, image, i, newImageListHandle, targetZoom);
+			} else {
+				addPlaceholderImageToImageList(newImageListHandle, scaledWidth, scaledHeight);
+			}
+		}
+		zoomToHandle.put(targetZoom, newImageListHandle);
+	}
+	return zoomToHandle.get(targetZoom);
+}
+
+private void addPlaceholderImageToImageList(long imageListHandle, int bitmapWidth, int bitmapHeight) {
+	long hDC = OS.GetDC (0);
+	if (hDC == 0) SWT.error(SWT.ERROR_NO_HANDLES);
+	long placeholderBitmapHandle = OS.CreateCompatibleBitmap(hDC, bitmapWidth, bitmapHeight);
+	if (placeholderBitmapHandle == 0) SWT.error(SWT.ERROR_NO_HANDLES);
+	OS.ImageList_Add(imageListHandle, placeholderBitmapHandle, placeholderBitmapHandle);
+	OS.DeleteObject(placeholderBitmapHandle);
+	OS.ReleaseDC(0, hDC);
 }
 
 public Point getImageSize() {
@@ -343,14 +380,14 @@ public void put (int index, Image image) {
 	if ((0 <= index && index < images.length) && (images [index] == image)) return;
 	int count = OS.ImageList_GetImageCount (handle);
 	if (!(0 <= index && index < count)) return;
-	if (image != null) set(index, image, count);
+	if (image != null) setForAllHandles(index, image, count);
 	images [index] = image;
 }
 
 public void remove (int index) {
 	int count = OS.ImageList_GetImageCount (handle);
 	if (!(0 <= index && index < count)) return;
-	OS.ImageList_Remove (handle, index);
+	zoomToHandle.values().forEach(handle -> OS.ImageList_Remove (handle, index));
 	System.arraycopy (images, index + 1, images, index, --count - index);
 	images [index] = null;
 }
@@ -359,17 +396,21 @@ public int removeRef() {
 	return --refCount;
 }
 
-void set (int index, Image image, int count) {
-	long hImage = image.handle;
+private void setForAllHandles(int index, Image image, int count) {
+	zoomToHandle.forEach((zoom, handle) -> set(index, image, count, handle, zoom));
+}
+
+void set (int index, Image image, int count, long listHandle, int zoom) {
+	long hImage = Image.win32_getHandle(image, zoom);
 	int [] cx = new int [1], cy = new int [1];
-	OS.ImageList_GetIconSize (handle, cx, cy);
+	OS.ImageList_GetIconSize (listHandle, cx, cy);
 	switch (image.type) {
 		case SWT.BITMAP: {
 			/*
 			* Note that the image size has to match the image list icon size.
 			*/
 			long hBitmap = 0, hMask = 0;
-			ImageData data = image.getImageDataAtCurrentZoom();
+			ImageData data = image.getImageData(zoom);
 			switch (data.getTransparencyType ()) {
 				case SWT.TRANSPARENCY_ALPHA:
 					/*
@@ -413,10 +454,10 @@ void set (int index, Image image, int count) {
 					break;
 			}
 			if (index == count) {
-				OS.ImageList_Add (handle, hBitmap, hMask);
+				OS.ImageList_Add (listHandle, hBitmap, hMask);
 			} else {
 				/* Note that the mask must always be replaced even for TRANSPARENCY_NONE */
-				OS.ImageList_Replace (handle, index, hBitmap, hMask);
+				OS.ImageList_Replace (listHandle, index, hBitmap, hMask);
 			}
 			if (hMask != 0) OS.DeleteObject (hMask);
 			if (hBitmap != hImage) OS.DeleteObject (hBitmap);
@@ -424,7 +465,7 @@ void set (int index, Image image, int count) {
 		}
 		case SWT.ICON: {
 			long hIcon = copyIcon (hImage, cx [0], cy [0]);
-			OS.ImageList_ReplaceIcon (handle, index == count ? -1 : index, hIcon);
+			OS.ImageList_ReplaceIcon (listHandle, index == count ? -1 : index, hIcon);
 			OS.DestroyIcon (hIcon);
 			break;
 		}
@@ -442,5 +483,4 @@ public int size () {
 	}
 	return result;
 }
-
 }

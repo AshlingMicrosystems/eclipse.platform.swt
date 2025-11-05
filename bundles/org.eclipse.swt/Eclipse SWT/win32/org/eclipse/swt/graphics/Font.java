@@ -46,21 +46,37 @@ public final class Font extends Resource {
 	 * platforms and should never be accessed from application code.
 	 * </p>
 	 *
-	 * @noreference This field is not intended to be referenced by clients.
 	 */
-	public long handle;
+	private long handle;
 
 	/**
 	 * The zoom in % of the standard resolution used for conversion of point height to pixel height
 	 * (Warning: This field is platform dependent)
 	 */
-	private int zoom;
-/**
- * Prevents uninitialized instances from being created outside the package.
- */
-Font(Device device) {
+	int zoom;
+
+	/**
+	 * this field is used to mark destroyed fonts
+	 */
+	private boolean isDestroyed;
+
+	/**
+	 * this field is used to store fontData provided during initialization
+	 */
+	private final FontData fontData;
+
+	/**
+	 * Font height in points. As the conversion to pixel height involves rounding the fontHeight must
+	 * be cached.
+	 */
+	private final float fontHeight;
+
+private Font(Device device, long handle, int zoom) {
 	super(device);
-	this.zoom = extractZoom(this.device);
+	this.fontData = null;
+	this.handle = handle;
+	this.zoom = zoom;
+	this.fontHeight = device.computePoints(fetchLogFontData(), handle, zoom);
 }
 
 /**
@@ -85,15 +101,19 @@ Font(Device device) {
  */
 public Font(Device device, FontData fd) {
 	super(device);
-	this.zoom = extractZoom(this.device);
-	init(fd);
+	if (fd == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
+	this.zoom = DPIUtil.getNativeDeviceZoom();
+	this.fontData = new FontData(fd.toString());
+	this.fontHeight = fd.height;
 	init();
 }
 
 private Font(Device device, FontData fd, int zoom) {
 	super(device);
+	if (fd == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
 	this.zoom = zoom;
-	init(fd);
+	this.fontData = new FontData(fd.toString());
+	this.fontHeight = fd.height;
 	init();
 }
 
@@ -129,8 +149,10 @@ public Font(Device device, FontData[] fds) {
 	for (FontData fd : fds) {
 		if (fd == null) SWT.error(SWT.ERROR_INVALID_ARGUMENT);
 	}
-	this.zoom = extractZoom(this.device);
-	init(fds[0]);
+	this.zoom = DPIUtil.getNativeDeviceZoom();
+	FontData fd = fds[0];
+	this.fontData = new FontData(fd.toString());
+	this.fontHeight = fd.height;
 	init();
 }
 
@@ -161,22 +183,17 @@ public Font(Device device, FontData[] fds) {
 public Font(Device device, String name, int height, int style) {
 	super(device);
 	if (name == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
-	this.zoom = extractZoom(this.device);
-	init(new FontData (name, height, style));
+	this.zoom = DPIUtil.getNativeDeviceZoom();
+	this.fontData = new FontData (name, height, style);
+	this.fontHeight = height;
 	init();
 }
 
-/*public*/ Font(Device device, String name, float height, int style) {
-	super(device);
-	if (name == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
-	this.zoom = extractZoom(this.device);
-	init(new FontData (name, height, style));
-	init();
-}
 @Override
 void destroy() {
 	OS.DeleteObject(handle);
 	handle = 0;
+	isDestroyed = true;
 }
 
 /**
@@ -194,7 +211,7 @@ public boolean equals(Object object) {
 	if (object == this) return true;
 	if (!(object instanceof Font)) return false;
 	Font font = (Font) object;
-	return device == font.device && handle == font.handle;
+	return device == font.device && win32_getHandle(this) == win32_getHandle(font);
 }
 
 /**
@@ -211,10 +228,14 @@ public boolean equals(Object object) {
  */
 public FontData[] getFontData() {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
+	LOGFONT logFont = fetchLogFontData();
+	return new FontData[] {FontData.win32_new(logFont, fontHeight)};
+}
+
+private LOGFONT fetchLogFontData() {
 	LOGFONT logFont = new LOGFONT ();
-	OS.GetObject(handle, LOGFONT.sizeof, logFont);
-	float heightInPoints = device.computePoints(logFont, handle, DPIUtil.mapZoomToDPI(zoom));
-	return new FontData[] {FontData.win32_new(logFont, heightInPoints)};
+	OS.GetObject(win32_getHandle(this), LOGFONT.sizeof, logFont);
+	return logFont;
 }
 
 /**
@@ -229,21 +250,14 @@ public FontData[] getFontData() {
  */
 @Override
 public int hashCode () {
-	return (int)handle;
+	return (int) win32_getHandle(this);
 }
 
 void init (FontData fd) {
 	if (fd == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
 	LOGFONT logFont = fd.data;
 	int lfHeight = logFont.lfHeight;
-	logFont.lfHeight = device.computePixels(fd.height);
-
-	int primaryZoom = extractZoom(device);
-	if (zoom != primaryZoom) {
-		float scaleFactor = 1f * zoom / primaryZoom;
-		logFont.lfHeight *= scaleFactor;
-	}
-
+	logFont.lfHeight = device.computePixels(fd.height, zoom);
 	handle = OS.CreateFontIndirect(logFont);
 	logFont.lfHeight = lfHeight;
 	if (handle == 0) SWT.error(SWT.ERROR_NO_HANDLES);
@@ -261,7 +275,7 @@ void init (FontData fd) {
  */
 @Override
 public boolean isDisposed() {
-	return handle == 0;
+	return isDestroyed;
 }
 
 /**
@@ -276,11 +290,24 @@ public String toString () {
 	return "Font {" + handle + "}";
 }
 
-private static int extractZoom(Device device) {
-	if (device == null) {
-		return DPIUtil.getNativeDeviceZoom();
+/**
+ * Creates or returns a handle for the requested font.
+ * <p>
+ * <b>IMPORTANT:</b> This method is not part of the public API for
+ * <code>Font</code>. It is marked public only so that it can be shared within
+ * the packages provided by SWT. It is not available on all platforms, and
+ * should never be called from application code.
+ *
+ * @param font the font to get the handle of
+ * @return handle of the font
+ *
+ * @noreference This method is not intended to be referenced by clients.
+ */
+public static long win32_getHandle(Font font) {
+	if (font.handle == 0 && font.fontData != null && !font.isDestroyed) {
+		font.init(font.fontData);
 	}
-	return DPIUtil.mapDPIToZoom(device._getDPIx());
+	return font.handle;
 }
 
 /**
@@ -300,16 +327,8 @@ private static int extractZoom(Device device) {
  * @noreference This method is not intended to be referenced by clients.
  */
 public static Font win32_new(Device device, long handle) {
-	Font font = new Font(device);
-	font.zoom = extractZoom(font.device);
-	font.handle = handle;
-	/*
-	 * When created this way, Font doesn't own its .handle, and
-	 * for this reason it can't be disposed. Tell leak detector
-	 * to just ignore it.
-	 */
-	font.ignoreNonDisposed();
-	return font;
+	int zoom = DPIUtil.getNativeDeviceZoom();
+	return win32_new(device, handle, zoom);
 }
 
 /**
@@ -331,8 +350,13 @@ public static Font win32_new(Device device, long handle) {
  * @since 3.126
  */
 public static Font win32_new(Device device, long handle, int zoom) {
-	Font font = win32_new(device, handle);
-	font.zoom = zoom;
+	Font font = new Font(device, handle, zoom);
+	/*
+	 * When created this way, Font doesn't own its .handle, and
+	 * for this reason it can't be disposed. Tell leak detector
+	 * to just ignore it.
+	 */
+	font.ignoreNonDisposed();
 	return font;
 }
 

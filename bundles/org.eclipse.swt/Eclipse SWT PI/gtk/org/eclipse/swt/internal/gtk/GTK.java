@@ -185,7 +185,7 @@ public class GTK extends OS {
 	public static final byte[] gtk_application_prefer_dark_theme = OS.ascii("gtk-application-prefer-dark-theme");
 
 	/** Named icons.
-	 * See https://docs.google.com/spreadsheet/pub?key=0AsPAM3pPwxagdGF4THNMMUpjUW5xMXZfdUNzMXhEa2c&output=html
+	 * See https://docs.google.com/spreadsheet/pub?key=0AsPAM3pPwxagdGF4THNMMUpjUW5xMXZfdUNzMXhEa2c&amp;output=html
 	 * See http://standards.freedesktop.org/icon-naming-spec/icon-naming-spec-latest.html#names
 	 * Icon preview tool: gtk3-icon-browser
 	 * Snippets often demonstrate usage of these. E.x 309, 258.
@@ -245,6 +245,8 @@ public class GTK extends OS {
 	public static final native long GTK_TYPE_WIDGET();
 	/** @method flags=const */
 	public static final native long GTK_TYPE_WINDOW();
+	/** @method flags=const */
+	public static final native long GTK_TYPE_FILE_FILTER();
 
 	/** GTK3 Macros [if-def'd in os.h] */
 	public static final native boolean GTK_IS_ACCEL_LABEL(long obj);
@@ -777,10 +779,6 @@ public class GTK extends OS {
 	 */
 	public static final native boolean gtk_gesture_is_recognized(long gesture);
 	/**
-	 * @param widget cast=(GtkWidget *)
-	 */
-	public static final native long gtk_gesture_drag_new(long widget);
-	/**
 	 * @param gesture cast=(GtkGesture *)
 	 */
 	public static final native long gtk_gesture_get_last_updated_sequence(long gesture);
@@ -807,14 +805,6 @@ public class GTK extends OS {
 	 * @param gesture cast=(GtkGestureRotate *)
 	 */
 	public static final native double gtk_gesture_rotate_get_angle_delta(long gesture);
-	/**
-	 * @param widget cast=(GtkWidget *)
-	 */
-	public static final native long gtk_gesture_rotate_new(long widget);
-	/**
-	 * @param widget cast=(GtkWidget *)
-	 */
-	public static final native long gtk_gesture_zoom_new(long widget);
 	/**
 	 * @param gesture cast=(GtkGestureZoom *)
 	 */
@@ -2357,8 +2347,7 @@ public class GTK extends OS {
 	public static final native void gtk_widget_grab_focus(long widget);
 	/** @param widget cast=(GtkWidget *) */
 	public static final native boolean gtk_widget_has_focus(long widget);
-	/** @param widget cast=(GtkWidget *) */
-	public static final native void gtk_widget_hide(long widget);
+
 	/** @param widget cast=(GtkWidget *) */
 	public static final native boolean gtk_widget_is_focus(long widget);
 	/** @param widget cast=(GtkWidget *) */
@@ -2416,8 +2405,7 @@ public class GTK extends OS {
 	 * @param height cast=(gint)
 	 */
 	public static final native void gtk_widget_set_size_request(long widget, int width, int height);
-	/** @param widget cast=(GtkWidget *) */
-	public static final native void gtk_widget_show(long widget);
+
 	/** @param widget cast=(GtkWidget *) */
 	public static final native boolean gtk_widget_activate(long widget);
 	/** @param widget cast=(GtkWidget *) */

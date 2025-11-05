@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2010, 2022 IBM Corporation and others.
+ * Copyright (c) 2010, 2025 IBM Corporation and others.
  *
  * This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License 2.0
@@ -282,15 +282,8 @@ class WebKit extends WebBrowser {
 
 	private static String getInternalErrorMsg () {
 		String reportErrMsg = "Please report this issue *with steps to reproduce* via:\n"
-				+ " https://bugs.eclipse.org/bugs/enter_bug.cgi?"
-				+ "alias=&assigned_to=platform-swt-inbox%40eclipse.org&attach_text=&blocked=&bug_file_loc=http%3A%2F%2F&bug_severity=normal"
-				+ "&bug_status=NEW&comment=&component=SWT&contenttypeentry=&contenttypemethod=autodetect&contenttypeselection=text%2Fplain"
-				+ "&data=&defined_groups=1&dependson=&description=&flag_type-1=X&flag_type-11=X&flag_type-12=X&flag_type-13=X&flag_type-14=X"
-				+ "&flag_type-15=X&flag_type-16=X&flag_type-2=X&flag_type-4=X&flag_type-6=X&flag_type-7=X&flag_type-8=X&form_name=enter_bug"
-				+ "&keywords=&maketemplate=Remember%20values%20as%20bookmarkable%20template&op_sys=Linux&product=Platform&qa_contact="
-				+ "&rep_platform=PC&requestee_type-1=&requestee_type-2=&short_desc=webkit2_BrowserProblem";
-
-		return reportErrMsg + "\nFor bug report, please atatch this stack trace:\n" + getStackTrace();
+				+ " https://github.com/eclipse-platform/eclipse.platform.swt/issues/new?assignees=&labels=&projects=&template=bug_report.md&title=";
+		return reportErrMsg + "\nFor bug report, please attach this stack trace:\n" + getStackTrace();
 	}
 
 
@@ -710,10 +703,19 @@ public void create (Composite parent, int style) {
 
 	// (!) Note this one's a 'webContext' signal, not webview. See:
 	// https://webkitgtk.org/reference/webkit2gtk/stable/WebKitWebContext.html#WebKitWebContext-download-started
-	OS.g_signal_connect (WebKitGTK.webkit_web_context_get_default(), WebKitGTK.download_started, Proc3.getAddress (), DOWNLOAD_STARTED);
+	if (GTK.GTK4) {
+		OS.g_signal_connect (WebKitGTK.webkit_network_session_get_default(), WebKitGTK.download_started, Proc3.getAddress (), DOWNLOAD_STARTED);
+	} else {
+		OS.g_signal_connect (WebKitGTK.webkit_web_context_get_default(), WebKitGTK.download_started, Proc3.getAddress (), DOWNLOAD_STARTED);
+	}
 
-	GTK.gtk_widget_show (webView);
-	GTK.gtk_widget_show (browser.handle);
+	if (GTK.GTK4) {
+		GTK.gtk_widget_set_visible(webView, true);
+		GTK.gtk_widget_set_visible(browser.handle, true);
+	} else {
+		GTK3.gtk_widget_show(webView);
+		GTK3.gtk_widget_show(browser.handle);
+	}
 
 	// Webview 'title' property
 	OS.g_signal_connect (webView, WebKitGTK.notify_title, 						Proc3.getAddress (), NOTIFY_TITLE);
@@ -743,7 +745,9 @@ public void create (Composite parent, int style) {
 	OS.g_object_set (settings, WebKitGTK.enable_developer_extras, 1, 0);
 	//disable hardware acceleration due to  https://bugs.webkit.org/show_bug.cgi?id=239429#c11
 	//even evolution ended up doing the same https://gitlab.gnome.org/GNOME/evolution/-/commit/eb62ccaa28bbbca7668913ce7d8056a6d75f9b05
-	OS.g_object_set (settings, WebKitGTK.hardware_acceleration_policy, 2, 0);
+	if (!GTK.GTK4) {
+		OS.g_object_set (settings, WebKitGTK.hardware_acceleration_policy, 2, 0);
+	}
 
 	OS.g_object_set (settings, WebKitGTK.default_charset, utfBytes, 0);
 	if (WebKitGTK.webkit_get_minor_version() >= 14) {
@@ -1132,10 +1136,26 @@ private static class Webkit2AsyncToSync {
 		long context = WebKitGTK.webkit_web_context_get_default();
 		long cookieManager = WebKitGTK.webkit_web_context_get_cookie_manager(context);
 		byte[] bytes = Converter.wcsToMbcs (cookieUrl, true);
-		long uri = WebKitGTK.soup_uri_new (bytes);
-		if (uri == 0) {
-			System.err.println("SWT WebKit: SoupURI == 0 when setting cookie");
-			return false;
+		long uri;
+		if (WebKitGTK.soup_get_major_version()==2) {
+			uri = WebKitGTK.soup_uri_new (bytes);
+			if (uri == 0) {
+				System.err.println("SWT WebKit: SoupURI == 0 when setting cookie");
+				return false;
+			}
+		} else {
+			long [] error = new long [1];
+			uri = OS.g_uri_parse(bytes, 0, error);
+			if (uri == 0) {
+				long errorMessageC = OS.g_error_get_message(error[0]);
+				String errorMessageStr = Converter.cCharPtrToJavaString(errorMessageC, false);
+				OS.g_error_free(error[0]);
+				System.err.format(
+						"SWT WebKit: Failed to parse cookie URI: %s%n",
+						errorMessageStr);
+				return false;
+			}
+
 		}
 		bytes = Converter.wcsToMbcs (cookieValue, true);
 		long soupCookie = WebKitGTK.soup_cookie_parse (bytes, uri);
@@ -1824,7 +1844,7 @@ void onDispose (Event e) {
 }
 
 void onResize (Event e) {
-	Rectangle rect = DPIUtil.autoScaleUp(browser.getClientArea ());
+	Rectangle rect = browser.getClientArea ();
 	if (webView == 0)
 		return;
 	GTK.gtk_widget_set_size_request (webView, rect.width, rect.height);
@@ -2071,8 +2091,8 @@ public boolean setUrl (String url, String postData, String[] headers) {
 					{ // Extract result meta data
 						// Get Media Type from Content-Type
 						String content_type = conn.getContentType();
-						int paramaterSeparatorIndex = content_type.indexOf(';');
-						mime_type = paramaterSeparatorIndex > 0 ? content_type.substring(0, paramaterSeparatorIndex) : content_type;
+						int parameterSeparatorIndex = content_type.indexOf(';');
+						mime_type = parameterSeparatorIndex > 0 ? content_type.substring(0, parameterSeparatorIndex) : content_type;
 
 						// Get Encoding if defined
 						if (content_type.indexOf(';') > 0) {

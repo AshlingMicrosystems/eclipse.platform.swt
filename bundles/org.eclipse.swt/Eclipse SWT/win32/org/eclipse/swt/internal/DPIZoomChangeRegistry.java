@@ -15,12 +15,14 @@ package org.eclipse.swt.internal;
 
 import java.util.*;
 import java.util.Map.*;
+import java.util.concurrent.*;
 
+import org.eclipse.swt.*;
 import org.eclipse.swt.widgets.*;
 
 public class DPIZoomChangeRegistry {
 
-	private static Map<Class<? extends Widget>, DPIZoomChangeHandler> dpiZoomChangeHandlers =  new TreeMap<>(
+	private static Map<Class<? extends Widget>, DPIZoomChangeHandler> dpiZoomChangeHandlers =  new ConcurrentSkipListMap<>(
 			(o1, o2) -> {
 	            if(o1.isAssignableFrom(o2)) {
 	            	return -1;
@@ -44,6 +46,9 @@ public class DPIZoomChangeRegistry {
 	 * @param scalingFactor factor as division between new zoom and old zoom, e.g. 1.5 for a scaling from 100% to 150%
 	 */
 	public static void applyChange(Widget widget, int newZoom, float scalingFactor) {
+		if (widget == null) {
+			return;
+		}
 		for (Entry<Class<? extends Widget>, DPIZoomChangeHandler> entry : dpiZoomChangeHandlers.entrySet()) {
 			Class<? extends Widget> clazz = entry.getKey();
 			DPIZoomChangeHandler handler = entry.getValue();
@@ -51,6 +56,12 @@ public class DPIZoomChangeRegistry {
 				handler.handleDPIChange(widget, newZoom, scalingFactor);
 			}
 		}
+		Event event = new Event();
+		event.type = SWT.ZoomChanged;
+		event.widget = widget;
+		event.detail = newZoom;
+		event.doit = true;
+		widget.notifyListeners(SWT.ZoomChanged, event);
 	}
 
 	public static void registerHandler(DPIZoomChangeHandler zoomChangeVisitor, Class<? extends Widget> clazzToRegisterFor) {

@@ -311,7 +311,7 @@ public String getToolTipText () {
  */
 public int getWidth () {
 	checkWidget ();
-	return DPIUtil.autoScaleDown(getWidthInPixels());
+	return DPIUtil.scaleDown(getWidthInPixels(), getZoom());
 }
 
 int getWidthInPixels () {
@@ -358,8 +358,8 @@ public void pack () {
 				int detail = (tvItem.state & OS.TVIS_SELECTED) != 0 ? SWT.SELECTED : 0;
 				Event event = parent.sendMeasureItemEvent (item, index, hDC, detail);
 				if (isDisposed () || parent.isDisposed ()) break;
-				Rectangle bounds = event.getBoundsInPixels();
-				itemRight = bounds.x + bounds.width;
+				Rectangle bounds = event.getBounds();
+				itemRight = DPIUtil.scaleUp(bounds.x + bounds.width, getZoom());
 			} else {
 				long hFont = item.fontHandle (index);
 				if (hFont != -1) hFont = OS.SelectObject (hDC, hFont);
@@ -385,14 +385,14 @@ public void pack () {
 			headerImage = image;
 		}
 		if (headerImage != null) {
-			Rectangle bounds = headerImage.getBoundsInPixels ();
+			Rectangle bounds = DPIUtil.scaleUp(headerImage.getBounds(), getZoom());
 			headerWidth += bounds.width;
 		}
 		int margin = 0;
 		if (hwndHeader != 0) {
 			margin = (int)OS.SendMessage (hwndHeader, OS.HDM_GETBITMAPMARGIN, 0, 0);
 		} else {
-			margin = OS.GetSystemMetrics (OS.SM_CXEDGE) * 3;
+			margin = getSystemMetrics (OS.SM_CXEDGE) * 3;
 		}
 		headerWidth += margin * 2;
 	}
@@ -536,7 +536,7 @@ void setImage (Image image, boolean sort, boolean right) {
 			hdItem.mask &= ~OS.HDI_IMAGE;
 			hdItem.fmt &= ~OS.HDF_IMAGE;
 			hdItem.fmt |= OS.HDF_BITMAP;
-			hdItem.hbm = image.handle;
+			hdItem.hbm = Image.win32_getHandle(image, getZoom());
 		} else {
 			hdItem.mask &= ~OS.HDI_BITMAP;
 			hdItem.fmt &= ~OS.HDF_BITMAP;
@@ -717,7 +717,7 @@ public void setToolTipText (String string) {
  */
 public void setWidth (int width) {
 	checkWidget ();
-	setWidthInPixels(DPIUtil.autoScaleUp(width));
+	setWidthInPixels(DPIUtil.scaleUp(width, getZoom()));
 }
 
 void setWidthInPixels (int width) {
@@ -764,10 +764,16 @@ private static void handleDPIChange(Widget widget, int newZoom, float scalingFac
 	if (!(widget instanceof TreeColumn treeColumn)) {
 		return;
 	}
-	treeColumn.setWidth(Math.round(treeColumn.getWidth() * scalingFactor));
+	Tree tree = treeColumn.getParent();
+	boolean ignoreColumnResize = tree.ignoreColumnResize;
+	tree.ignoreColumnResize = true;
+	final int newColumnWidth = Math.round(treeColumn.getWidthInPixels() * scalingFactor);
+	treeColumn.setWidthInPixels(newColumnWidth);
+	tree.ignoreColumnResize = ignoreColumnResize;
+
 	Image image = treeColumn.image;
 	if (image != null) {
-		treeColumn.setImage (Image.win32_new(image, newZoom));
+		treeColumn.setImage(image);
 	}
 }
 }

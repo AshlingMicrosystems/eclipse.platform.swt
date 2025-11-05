@@ -17,9 +17,9 @@
 
 HELP="
 Build GTK4 or GTK3 bindings and (optionally) copy them to binary repository.
-Paramaters (specified in this order):
-clean    - delete *.o and *.so files from current folder. If this is the only paramater, do nothing else.
-			But if other paramaters are given and this is the first one, then continue with other actions.
+Parameters (specified in this order):
+clean    - delete *.o and *.so files from current folder. If this is the only parameter, do nothing else.
+			But if other parameters are given and this is the first one, then continue with other actions.
 
 One of the following 3:
 -gtk3   : Build bindings with GTK3.
@@ -74,7 +74,7 @@ cd `dirname $0`
 
 MAKE_TYPE=make
 
-export CFLAGS='-O -Wall -fPIC'
+export CFLAGS="-O -Wall -fPIC ${GTK_XCFLAGS}"
 
 # Determine which OS we are on
 if [ "${OS}" = "" ]; then
@@ -97,6 +97,7 @@ if [ "${MODEL}" = "" ]; then
 	else
 		MODEL=`uname -m`
 	fi
+	export MODEL
 fi
 case $MODEL in
 	"x86_64")
@@ -134,11 +135,18 @@ case $SWT_OS.$SWT_ARCH in
 			export PKG_CONFIG_PATH="/usr/lib64/pkgconfig/"
 		fi
 		;;
+	"linux.riscv64")
+		if [ "${CC}" = "" ]; then
+			export CC=gcc
+		fi
+		if [ "${PKG_CONFIG_PATH}" = "" ]; then
+			export PKG_CONFIG_PATH="/usr/lib64/pkgconfig/"
+		fi
 esac
 
 
 # For 64-bit CPUs, we have a switch
-if [ ${MODEL} = 'x86_64' -o ${MODEL} = 'ppc64le' -o ${MODEL} = 'aarch64' -o ${MODEL} = 'loongarch64' ]; then
+if [ ${MODEL} = 'x86_64' -o ${MODEL} = 'ppc64le' -o ${MODEL} = 'aarch64' -o ${MODEL} = 'loongarch64' -o ${MODEL} = 'riscv64' ]; then
 	SWT_PTR_CFLAGS=-DJNI64
 	if [ -d /lib64 ]; then
 		XLIB64=-L/usr/X11R6/lib64
@@ -205,10 +213,10 @@ fi
 
 # Safety check:
 # If "install" was given as target, check that OUTPUT_DIR is a valid directory.
-for i in "$@"; do  # loop over all input paramaters
+for i in "$@"; do  # loop over all input parameters
 	if [ "$i" = "install" ]; then
 		if [ ! -d "${OUTPUT_DIR}" ]; then   # if directory not valid.
-		func_echo_error "ERROR: 'install' was passed in as paramater, but OUTPUT_DIR :"
+		func_echo_error "ERROR: 'install' was passed in as parameter, but OUTPUT_DIR :"
 		func_echo_error "(${OUTPUT_DIR}) "
 		func_echo_error "is not a valid directory."
 		func_echo_error "Exit with failure"
@@ -217,7 +225,7 @@ for i in "$@"; do  # loop over all input paramaters
 	fi
 done
 
-for i in "$@"; do  # loop over all input paramaters
+for i in "$@"; do  # loop over all input parameters
 	if [ "$i" = "--print-outputdir-and-exit" ]; then
 		# used by external scripts to find binary folder
 		echo "OUTPUT_DIR=${OUTPUT_DIR}"
@@ -235,7 +243,7 @@ if [ "x${1}" = "xclean" ]; then
 	shift
 
 	# if there are no more other parameters, exit.
-	# don't exit if there are more paramaters. Useful for one-liners like: ./build.sh clean -gtk-all install
+	# don't exit if there are more parameters. Useful for one-liners like: ./build.sh clean -gtk-all install
 	if [ "$1" = "" ]; then
 		exit $?
 	fi
@@ -273,14 +281,7 @@ func_build_gtk3 () {
 	fi
 }
 
-if [ "$1" = "-gtk-all" ]; then
-	shift
-	func_echo_plus "Note: When building multiple GTK versions, a cleanup is required (and automatically performed) between them."
-	func_clean_up
-	func_build_gtk4 "$@"
-	func_clean_up
-	func_build_gtk3 "$@"
-elif [ "$1" = "-gtk4" ]; then
+if [ "$1" = "-gtk4" ]; then
 	shift
 	func_build_gtk4 "$@"
 elif [ "$1" = "-gtk3" ]; then
@@ -288,7 +289,17 @@ elif [ "$1" = "-gtk3" ]; then
 	func_build_gtk3 "$@"
 elif [ "${GTK_VERSION}" = "4.0" ]; then
 	func_build_gtk4 "$@"
-elif [ "${GTK_VERSION}" = "3.0" -o "${GTK_VERSION}" = "" ]; then
-	export GTK_VERSION="3.0"
+elif [ "${GTK_VERSION}" = "3.0" ]; then
+	func_build_gtk3 "$@"
+else
+	if [ "$1" = "-gtk-all" ]; then
+		shift
+	fi
+	func_echo_plus "==== Building GTK3 + GTK 4 ===="
+	func_echo_plus "Note: When building multiple GTK versions, a cleanup is required (and automatically performed) between them."
+	func_clean_up
+	func_build_gtk4 "$@"
+	func_echo_plus "Note: When building multiple GTK versions, a cleanup is required (and automatically performed) between them."
+	func_clean_up
 	func_build_gtk3 "$@"
 fi

@@ -63,6 +63,8 @@ import org.eclipse.swt.events.VerifyListener;
 import org.eclipse.swt.graphics.Color;
 import org.eclipse.swt.graphics.Font;
 import org.eclipse.swt.graphics.FontData;
+import org.eclipse.swt.graphics.FontMetrics;
+import org.eclipse.swt.graphics.GC;
 import org.eclipse.swt.graphics.GlyphMetrics;
 import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.graphics.RGB;
@@ -76,18 +78,16 @@ import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.ScrollBar;
 import org.eclipse.swt.widgets.Widget;
-import org.eclipse.test.Screenshots;
 import org.junit.Assume;
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.TestWatcher;
 
 /**
  * Automated Test Suite for class org.eclipse.swt.custom.StyledText
  *
  * @see org.eclipse.swt.custom.StyledText
  */
+@SuppressWarnings("restriction")
 public class Test_org_eclipse_swt_custom_StyledText extends Test_org_eclipse_swt_widgets_Canvas {
 
 StyledText text;
@@ -101,14 +101,6 @@ final static String PLATFORM_LINE_DELIMITER = System.lineSeparator();
 Map<RGB, Color> colors = new HashMap<>();
 private boolean listenerCalled;
 private boolean listener2Called;
-
-@Rule public TestWatcher screenshotRule = new TestWatcher() {
-	@Override
-	protected void failed(Throwable e, org.junit.runner.Description description) {
-		super.failed(e, description);
-		Screenshots.takeScreenshot(description.getTestClass(), description.getMethodName());
-	}
-};
 
 @Override
 @Before
@@ -177,6 +169,30 @@ public void test_ConstructorLorg_eclipse_swt_widgets_CompositeI(){
 	assertNull(":b:", text.getVerticalBar());
 	assertNull(":c:", text.getHorizontalBar());
 	text.dispose();
+}
+
+@Test
+public void test_getTextBounds() {
+	StyledText text = new StyledText(shell,SWT.BORDER);
+	try {
+		text.setText("\r\n\r\ntext");
+		int firstLineOffset = text.getOffsetAtLine(0);
+		Rectangle r = text.getTextBounds(firstLineOffset, firstLineOffset);
+		assertEquals(0,r.x);
+		assertEquals(0,r.y);
+		assertEquals(0,r.width);
+		assertTrue(r.height > 0);
+
+		text.setText("\r\n\r\ntext");
+		int thirdLineOffset = text.getOffsetAtLine(2);
+		r = text.getTextBounds(thirdLineOffset, thirdLineOffset);
+		assertEquals(0, r.x);
+		assertTrue(r.y > 0);
+		assertTrue(r.width > 0);
+		assertTrue(r.height > 0);
+	}finally {
+		text.dispose();
+	}
 }
 
 @Test
@@ -4776,6 +4792,11 @@ public void test_notFixedLineHeightDoesntChangeLinePixelIfUnnecessary() {
 	int firstLinePixel = text.getLinePixel(line);
 	text.setWordWrap(true); // make non fixed line height
 	assertEquals(firstLinePixel, text.getLinePixel(line));
+	shell.setVisible(true);
+	shell.forceActive();
+	text.setVisible(true);
+	assertTrue("setFocus failed",text.setFocus());
+	assertTrue("text has not focus",text.isFocusControl());
 	text.replaceTextRange(0, 1, "X");
 	assertEquals(0, text.getTopIndex());
 	assertEquals(0, text.getLinePixel(0));
@@ -5919,5 +5940,23 @@ public void test_rangeSelectionKeepsCaret() {
 	text.invokeAction(ST.SELECT_LINE_DOWN);
 	assertEquals("Selection does not start from caret", initialOffset, text.getSelection().x);
 	assertNotEquals("Selection is not left-to-right", text.getSelection().x, text.getCaretOffset());
+}
+
+@Test
+public void test_bug1610_fixedLineHeightWithChangingToSmallerFont_noException() {
+	shell.setVisible(true);
+	shell.setLayout(new GridLayout(1, false));
+
+	GC gc = new GC(shell.getDisplay());
+	FontMetrics metrics = gc.getFontMetrics();
+	text.setFixedLineMetrics(metrics);
+
+	FontData fontData = text.getFont().getFontData()[0];
+	text.setText("");
+	int smallFontHeight = metrics.getAscent() + metrics.getDescent() - 4;
+	Font font = new Font(text.getDisplay(), fontData.getName(), smallFontHeight, fontData.getStyle());
+	text.setFont(font);
+	font.dispose();
+	gc.dispose();
 }
 }

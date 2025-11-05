@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2024 IBM Corporation and others. All rights reserved.
+ * Copyright (c) 2000, 2025 IBM Corporation and others. All rights reserved.
  * The contents of this file are made available under the terms
  * of the GNU Lesser General Public License (LGPL) Version 2.1 that
  * accompanies this distribution (lgpl-v21.txt).  The LGPL is also
@@ -270,6 +270,7 @@ typedef enum {
 	GTK_1TYPE_1CELL_1RENDERER_1PIXBUF_FUNC,
 	GTK_1TYPE_1CELL_1RENDERER_1TEXT_FUNC,
 	GTK_1TYPE_1CELL_1RENDERER_1TOGGLE_FUNC,
+	GTK_1TYPE_1FILE_1FILTER_FUNC,
 	GTK_1TYPE_1IM_1MULTICONTEXT_FUNC,
 	GTK_1TYPE_1TEXT_1VIEW_1ACCESSIBLE_FUNC,
 	GTK_1TYPE_1WIDGET_FUNC,
@@ -400,17 +401,14 @@ typedef enum {
 	gtk_1frame_1set_1label_1widget_FUNC,
 	gtk_1gesture_1drag_1get_1offset_FUNC,
 	gtk_1gesture_1drag_1get_1start_1point_FUNC,
-	gtk_1gesture_1drag_1new_FUNC,
 	gtk_1gesture_1get_1last_1updated_1sequence_FUNC,
 	gtk_1gesture_1get_1point_FUNC,
 	gtk_1gesture_1is_1recognized_FUNC,
 	gtk_1gesture_1rotate_1get_1angle_1delta_FUNC,
-	gtk_1gesture_1rotate_1new_FUNC,
 	gtk_1gesture_1single_1get_1current_1button_FUNC,
 	gtk_1gesture_1single_1set_1button_FUNC,
 	gtk_1gesture_1swipe_1get_1velocity_FUNC,
 	gtk_1gesture_1zoom_1get_1scale_1delta_FUNC,
-	gtk_1gesture_1zoom_1new_FUNC,
 	gtk_1get_1default_1language_FUNC,
 	gtk_1get_1major_1version_FUNC,
 	gtk_1get_1micro_1version_FUNC,
@@ -758,7 +756,6 @@ typedef enum {
 	gtk_1widget_1grab_1focus_FUNC,
 	gtk_1widget_1has_1default_FUNC,
 	gtk_1widget_1has_1focus_FUNC,
-	gtk_1widget_1hide_FUNC,
 	gtk_1widget_1insert_1action_1group_FUNC,
 	gtk_1widget_1is_1focus_FUNC,
 	gtk_1widget_1mnemonic_1activate_FUNC,
@@ -784,7 +781,6 @@ typedef enum {
 	gtk_1widget_1set_1valign_FUNC,
 	gtk_1widget_1set_1vexpand_FUNC,
 	gtk_1widget_1set_1visible_FUNC,
-	gtk_1widget_1show_FUNC,
 	gtk_1widget_1unparent_FUNC,
 	gtk_1window_1fullscreen_FUNC,
 	gtk_1window_1get_1default_1size_FUNC,
@@ -949,6 +945,8 @@ typedef enum {
 	g_1list_1next_FUNC,
 	g_1list_1nth_1data_FUNC,
 	g_1list_1previous_FUNC,
+	g_1list_1store_1append_FUNC,
+	g_1list_1store_1new_FUNC,
 	g_1log_1default_1handler_FUNC,
 	g_1log_1remove_1handler_FUNC,
 	g_1log_1set_1handler_FUNC,
@@ -1029,6 +1027,7 @@ typedef enum {
 	g_1type_1parent_FUNC,
 	g_1type_1register_1static_FUNC,
 	g_1unsetenv_FUNC,
+	g_1uri_1parse_FUNC,
 	g_1utf16_1offset_1to_1pointer_FUNC,
 	g_1utf16_1offset_1to_1utf8_1offset_FUNC,
 	g_1utf16_1pointer_1to_1offset_FUNC,

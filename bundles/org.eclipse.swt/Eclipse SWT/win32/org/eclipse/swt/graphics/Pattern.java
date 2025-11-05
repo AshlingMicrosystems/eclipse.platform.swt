@@ -13,6 +13,8 @@
  *******************************************************************************/
 package org.eclipse.swt.graphics;
 
+import java.util.*;
+
 import org.eclipse.swt.*;
 import org.eclipse.swt.internal.*;
 import org.eclipse.swt.internal.gdip.*;
@@ -38,22 +40,15 @@ import org.eclipse.swt.internal.win32.*;
  * @since 3.1
  */
 public class Pattern extends Resource {
+	// These are the possible fields with which a pattern can be initialized from the appropriate constructors.
+	private final Image image;
+	private float baseX1, baseY1, baseX2, baseY2;
+	private Color color1, color2;
+	private int alpha1, alpha2;
 
-	/**
-	 * the OS resource for the Pattern
-	 * (Warning: This field is platform dependent)
-	 * <p>
-	 * <b>IMPORTANT:</b> This field is <em>not</em> part of the SWT
-	 * public API. It is marked public only so that it can be shared
-	 * within the packages provided by SWT. It is not available on all
-	 * platforms and should never be accessed from application code.
-	 * </p>
-	 *
-	 * @noreference This field is not intended to be referenced by clients.
-	 */
-	public long handle;
+	private final Map<Integer, PatternHandle> zoomToHandle = new HashMap<>();
 
-	private Runnable bitmapDestructor;
+	private boolean isDestroyed;
 
 /**
  * Constructs a new Pattern given an image. Drawing with the resulting
@@ -88,23 +83,9 @@ public Pattern(Device device, Image image) {
 	if (image == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
 	if (image.isDisposed()) SWT.error(SWT.ERROR_INVALID_ARGUMENT);
 	this.device.checkGDIP();
-	long[] gdipImage = image.createGdipImage();
-	long img = gdipImage[0];
-	int width = Gdip.Image_GetWidth(img);
-	int height = Gdip.Image_GetHeight(img);
-	handle = Gdip.TextureBrush_new(img, Gdip.WrapModeTile, 0, 0, width, height);
-	bitmapDestructor = () -> {
-		Gdip.Bitmap_delete(img);
-		if (gdipImage[1] != 0) {
-			long hHeap = OS.GetProcessHeap ();
-			OS.HeapFree(hHeap, 0, gdipImage[1]);
-		}
-	};
-	if (handle == 0) {
-		bitmapDestructor.run();
-		SWT.error(SWT.ERROR_NO_HANDLES);
-	}
+	this.image = image;
 	init();
+	this.device.registerResourceWithZoomSupport(this);
 }
 
 /**
@@ -187,65 +168,55 @@ public Pattern(Device device, float x1, float y1, float x2, float y2, Color colo
  */
 public Pattern(Device device, float x1, float y1, float x2, float y2, Color color1, int alpha1, Color color2, int alpha2) {
 	super(device);
-	x1 = DPIUtil.autoScaleUp(x1);
-	y1 = DPIUtil.autoScaleUp(y1);
-	x2 = DPIUtil.autoScaleUp(x2);
-	y2 = DPIUtil.autoScaleUp(y2);
-	if (color1 == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
-	if (color1.isDisposed()) SWT.error(SWT.ERROR_INVALID_ARGUMENT);
-	if (color2 == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
-	if (color2.isDisposed()) SWT.error(SWT.ERROR_INVALID_ARGUMENT);
-	this.device.checkGDIP();
-	int colorRef1 = color1.handle;
-	int foreColor = ((alpha1 & 0xFF) << 24) | ((colorRef1 >> 16) & 0xFF) | (colorRef1 & 0xFF00) | ((colorRef1 & 0xFF) << 16);
-	if (x1 == x2 && y1 == y2) {
-		handle = Gdip.SolidBrush_new(foreColor);
-		if (handle == 0) SWT.error(SWT.ERROR_NO_HANDLES);
-	} else {
-		int colorRef2 = color2.handle;
-		int backColor = ((alpha2 & 0xFF) << 24) | ((colorRef2 >> 16) & 0xFF) | (colorRef2 & 0xFF00) | ((colorRef2 & 0xFF) << 16);
-		PointF p1 = new PointF();
-		p1.X = x1;
-		p1.Y = y1;
-		PointF p2 = new PointF();
-		p2.X = x2;
-		p2.Y = y2;
-		handle = Gdip.LinearGradientBrush_new(p1, p2, foreColor, backColor);
-		if (handle == 0) SWT.error(SWT.ERROR_NO_HANDLES);
-		if (alpha1 != 0xFF || alpha2 != 0xFF) {
-			int a = (int)((alpha1 & 0xFF) * 0.5f + (alpha2 & 0xFF) * 0.5f);
-			int r = (int)(((colorRef1 & 0xFF) >> 0) * 0.5f + ((colorRef2 & 0xFF) >> 0) * 0.5f);
-			int g = (int)(((colorRef1 & 0xFF00) >> 8) * 0.5f + ((colorRef2 & 0xFF00) >> 8) * 0.5f);
-			int b = (int)(((colorRef1 & 0xFF0000) >> 16) * 0.5f + ((colorRef2 & 0xFF0000) >> 16) * 0.5f);
-			int midColor = a << 24 | r << 16 | g << 8 | b;
-			Gdip.LinearGradientBrush_SetInterpolationColors(handle, new int [] {foreColor, midColor, backColor}, new float[]{0, 0.5f, 1}, 3);
-		}
-	}
+	this.baseX1 = x1;
+	this.baseX2 = x2;
+	this.baseY1 = y1;
+	this.baseY2 = y2;
+	this.color1 = color1;
+	this.color2 = color2;
+	this.alpha1 = alpha1;
+	this.alpha2 = alpha2;
+	this.image = null;
 	init();
+	this.device.registerResourceWithZoomSupport(this);
+}
+
+private PatternHandle newPatternHandle(int zoom) {
+	if (image != null) {
+		return new ImagePatternHandle(zoom);
+	}
+	return new BasePatternHandle(zoom);
+}
+
+private PatternHandle getPatternHandle(int zoom) {
+	if (!zoomToHandle.containsKey(zoom)) {
+		zoomToHandle.put(zoom, newPatternHandle(zoom));
+	}
+	return zoomToHandle.get(zoom);
+}
+
+long getHandle(int zoom) {
+	return this.getPatternHandle(zoom).handle;
 }
 
 @Override
 void destroy() {
-	int type = Gdip.Brush_GetType(handle);
-	switch (type) {
-		case Gdip.BrushTypeSolidColor:
-			Gdip.SolidBrush_delete(handle);
-			break;
-		case Gdip.BrushTypeHatchFill:
-			Gdip.HatchBrush_delete(handle);
-			break;
-		case Gdip.BrushTypeLinearGradient:
-			Gdip.LinearGradientBrush_delete(handle);
-			break;
-		case Gdip.BrushTypeTextureFill:
-			Gdip.TextureBrush_delete(handle);
-			break;
-	}
-	handle = 0;
-	if (bitmapDestructor != null) {
-		bitmapDestructor.run();
-		bitmapDestructor = null;
-	}
+	device.deregisterResourceWithZoomSupport(this);
+	zoomToHandle.values().forEach(PatternHandle::destroy);
+	zoomToHandle.clear();
+	this.isDestroyed = true;
+}
+
+@Override
+void destroyHandlesExcept(Set<Integer> zoomLevels) {
+	zoomToHandle.entrySet().removeIf(entry -> {
+		final Integer zoom = entry.getKey();
+		if (!zoomLevels.contains(zoom) ) {
+			entry.getValue().destroy();
+			return true;
+		}
+		return false;
+	});
 }
 
 /**
@@ -260,7 +231,7 @@ void destroy() {
  */
 @Override
 public boolean isDisposed() {
-	return handle == 0;
+	return isDestroyed;
 }
 
 /**
@@ -272,7 +243,118 @@ public boolean isDisposed() {
 @Override
 public String toString() {
 	if (isDisposed()) return "Pattern {*DISPOSED*}";
-	return "Pattern {" + handle + "}";
+	return "Pattern {" + zoomToHandle + "}";
 }
 
+private class BasePatternHandle extends PatternHandle {
+	public BasePatternHandle(int zoom) {
+		super(zoom);
+	}
+
+	@Override
+	long createHandle(int zoom) {
+		long handle;
+		float x1 = DPIUtil.scaleUp(baseX1, zoom);
+		float y1 = DPIUtil.scaleUp(baseY1, zoom);
+		float x2 = DPIUtil.scaleUp(baseX2, zoom);
+		float y2 = DPIUtil.scaleUp(baseY2, zoom);
+		if (color1 == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
+		if (color1.isDisposed()) SWT.error(SWT.ERROR_INVALID_ARGUMENT);
+		if (color2 == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
+		if (color2.isDisposed()) SWT.error(SWT.ERROR_INVALID_ARGUMENT);
+		device.checkGDIP();
+		int colorRef1 = color1.handle;
+		int foreColor = ((alpha1 & 0xFF) << 24) | ((colorRef1 >> 16) & 0xFF) | (colorRef1 & 0xFF00) | ((colorRef1 & 0xFF) << 16);
+		if (x1 == x2 && y1 == y2) {
+			handle = Gdip.SolidBrush_new(foreColor);
+			if (handle == 0) SWT.error(SWT.ERROR_NO_HANDLES);
+		} else {
+			int colorRef2 = color2.handle;
+			int backColor = ((alpha2 & 0xFF) << 24) | ((colorRef2 >> 16) & 0xFF) | (colorRef2 & 0xFF00) | ((colorRef2 & 0xFF) << 16);
+			PointF p1 = new PointF();
+			p1.X = x1;
+			p1.Y = y1;
+			PointF p2 = new PointF();
+			p2.X = x2;
+			p2.Y = y2;
+			handle = Gdip.LinearGradientBrush_new(p1, p2, foreColor, backColor);
+			if (handle == 0) SWT.error(SWT.ERROR_NO_HANDLES);
+			if (alpha1 != 0xFF || alpha2 != 0xFF) {
+				int a = (int)((alpha1 & 0xFF) * 0.5f + (alpha2 & 0xFF) * 0.5f);
+				int r = (int)(((colorRef1 & 0xFF) >> 0) * 0.5f + ((colorRef2 & 0xFF) >> 0) * 0.5f);
+				int g = (int)(((colorRef1 & 0xFF00) >> 8) * 0.5f + ((colorRef2 & 0xFF00) >> 8) * 0.5f);
+				int b = (int)(((colorRef1 & 0xFF0000) >> 16) * 0.5f + ((colorRef2 & 0xFF0000) >> 16) * 0.5f);
+				int midColor = a << 24 | r << 16 | g << 8 | b;
+				Gdip.LinearGradientBrush_SetInterpolationColors(handle, new int [] {foreColor, midColor, backColor}, new float[]{0, 0.5f, 1}, 3);
+			}
+		}
+		return handle;
+	}
+}
+
+private class ImagePatternHandle extends PatternHandle {
+	private long[] gdipImage;
+
+	public ImagePatternHandle(int zoom) {
+		super(zoom);
+	}
+
+	@Override
+	long createHandle(int zoom) {
+		gdipImage = image.createGdipImage(zoom);
+		long img = gdipImage[0];
+		int width = Gdip.Image_GetWidth(img);
+		int height = Gdip.Image_GetHeight(img);
+		long handle = Gdip.TextureBrush_new(img, Gdip.WrapModeTile, 0, 0, width, height);
+		if (handle == 0) {
+			cleanupBitmap();
+			SWT.error(SWT.ERROR_NO_HANDLES);
+		}
+		return handle;
+	}
+
+	@Override
+	protected void destroy() {
+		super.destroy();
+		cleanupBitmap();
+	}
+
+	private void cleanupBitmap() {
+		if (gdipImage.length < 2) return;
+		long img = gdipImage[0];
+		Gdip.Bitmap_delete(img);
+		if (gdipImage[1] != 0) {
+			long hHeap = OS.GetProcessHeap ();
+			OS.HeapFree(hHeap, 0, gdipImage[1]);
+		}
+	}
+}
+
+private abstract class PatternHandle {
+	private final long handle;
+
+	public PatternHandle(int zoom) {
+		this.handle = createHandle(zoom);
+	}
+
+	abstract long createHandle(int zoom);
+
+	protected void destroy() {
+		int type = Gdip.Brush_GetType(handle);
+		switch (type) {
+			case Gdip.BrushTypeSolidColor:
+				Gdip.SolidBrush_delete(handle);
+				break;
+			case Gdip.BrushTypeHatchFill:
+				Gdip.HatchBrush_delete(handle);
+				break;
+			case Gdip.BrushTypeLinearGradient:
+				Gdip.LinearGradientBrush_delete(handle);
+				break;
+			case Gdip.BrushTypeTextureFill:
+				Gdip.TextureBrush_delete(handle);
+				break;
+		}
+	}
+}
 }

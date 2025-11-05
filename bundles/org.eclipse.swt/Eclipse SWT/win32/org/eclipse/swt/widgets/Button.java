@@ -20,6 +20,7 @@ import org.eclipse.swt.events.*;
 import org.eclipse.swt.graphics.*;
 import org.eclipse.swt.internal.*;
 import org.eclipse.swt.internal.win32.*;
+import org.eclipse.swt.internal.win32.version.*;
 
 /**
  * Instances of this class represent a selectable user interface object that
@@ -54,24 +55,13 @@ public class Button extends Control {
 	ImageList imageList;
 	boolean ignoreMouse, grayed, useDarkModeExplorerTheme;
 	static final int MARGIN = 4;
-	static final int CHECK_WIDTH, CHECK_HEIGHT;
+	private int checkWidth, checkHeight;
 	static final int ICON_WIDTH = 128, ICON_HEIGHT = 128;
 	static /*final*/ boolean COMMAND_LINK = false;
 	static final char[] STRING_WITH_ZERO_CHAR = new char[] {'0'};
 	static final long ButtonProc;
 	static final TCHAR ButtonClass = new TCHAR (0, "BUTTON", true);
 	static {
-		long hBitmap = OS.LoadBitmap (0, OS.OBM_CHECKBOXES);
-		if (hBitmap == 0) {
-			CHECK_WIDTH = OS.GetSystemMetrics (OS.SM_CXVSCROLL);
-			CHECK_HEIGHT = OS.GetSystemMetrics (OS.SM_CYVSCROLL);
-		} else {
-			BITMAP bitmap = new BITMAP ();
-			OS.GetObject (hBitmap, BITMAP.sizeof, bitmap);
-			OS.DeleteObject (hBitmap);
-			CHECK_WIDTH = bitmap.bmWidth / 4;
-			CHECK_HEIGHT =  bitmap.bmHeight / 3;
-		}
 		WNDCLASS lpWndClass = new WNDCLASS ();
 		OS.GetClassInfo (0, ButtonClass, lpWndClass);
 		ButtonProc = lpWndClass.lpfnWndProc;
@@ -119,6 +109,30 @@ public class Button extends Control {
  */
 public Button (Composite parent, int style) {
 	super (parent, checkStyle (style));
+	refreshCheckSize(this.nativeZoom);
+}
+
+/**
+ * Refresh the checkWidth and checkHeight Size whenever there is a dpi change or
+ * when button is created. Factor is calculated by identifying the zoom change
+ * e.g. 100 -> 200 should be scaled down to half (currentZoom / primaryZoom)
+ *
+ * @param currentZoom
+ */
+private void refreshCheckSize(int currentZoom) {
+	long hBitmap = OS.LoadBitmap(0, OS.OBM_CHECKBOXES);
+	if (hBitmap == 0) {
+		checkWidth = getSystemMetrics(OS.SM_CXVSCROLL);
+		checkHeight = getSystemMetrics(OS.SM_CYVSCROLL);
+	} else {
+		int primaryZoom = display.getPrimaryMonitor().getZoom();
+		float factor = (float) currentZoom / primaryZoom;
+		BITMAP bitmap = new BITMAP();
+		OS.GetObject(hBitmap, BITMAP.sizeof, bitmap);
+		OS.DeleteObject(hBitmap);
+		checkWidth = (int) ((bitmap.bmWidth / 4) * factor);
+		checkHeight = (int) ((bitmap.bmHeight / 3) * factor);
+	}
 }
 
 void _setImage (Image image) {
@@ -126,7 +140,7 @@ void _setImage (Image image) {
 	if (imageList != null) imageList.dispose ();
 	imageList = null;
 	if (image != null) {
-		imageList = new ImageList (style & SWT.RIGHT_TO_LEFT);
+		imageList = new ImageList (style & SWT.RIGHT_TO_LEFT, getZoom());
 		if (OS.IsWindowEnabled (handle)) {
 			imageList.add (image);
 		} else {
@@ -135,7 +149,7 @@ void _setImage (Image image) {
 			imageList.add (disabledImage);
 		}
 		BUTTON_IMAGELIST buttonImageList = new BUTTON_IMAGELIST ();
-		buttonImageList.himl = imageList.getHandle ();
+		buttonImageList.himl = imageList.getHandle(getZoom());
 		int oldBits = OS.GetWindowLong (handle, OS.GWL_STYLE), newBits = oldBits;
 		newBits &= ~(OS.BS_LEFT | OS.BS_CENTER | OS.BS_RIGHT);
 		if ((style & SWT.LEFT) != 0) newBits |= OS.BS_LEFT;
@@ -176,7 +190,7 @@ void _setText (String text) {
 	if ((style & SWT.RIGHT) != 0) newBits |= OS.BS_RIGHT;
 	if (imageList != null) {
 		BUTTON_IMAGELIST buttonImageList = new BUTTON_IMAGELIST ();
-		buttonImageList.himl = imageList.getHandle ();
+		buttonImageList.himl = imageList.getHandle(getZoom());
 		if (text.length () == 0) {
 			if ((style & SWT.LEFT) != 0) buttonImageList.uAlign = OS.BUTTON_IMAGELIST_ALIGN_LEFT;
 			if ((style & SWT.CENTER) != 0) buttonImageList.uAlign = OS.BUTTON_IMAGELIST_ALIGN_CENTER;
@@ -283,7 +297,7 @@ int computeLeftMargin () {
 	if ((style & (SWT.PUSH | SWT.TOGGLE)) == 0) return MARGIN;
 	int margin = 0;
 	if (image != null && text.length () != 0) {
-		Rectangle bounds = DPIUtil.autoScaleBounds(image.getBounds(), this.getZoom(), 100);
+		Rectangle bounds = DPIUtil.scaleBounds(image.getBounds(), this.getZoom(), 100);
 		margin += bounds.width + MARGIN * 2;
 		long oldFont = 0;
 		long hDC = OS.GetDC (handle);
@@ -315,11 +329,11 @@ int computeLeftMargin () {
 	int width = 0, height = 0, border = getBorderWidthInPixels ();
 	if ((style & SWT.ARROW) != 0) {
 		if ((style & (SWT.UP | SWT.DOWN)) != 0) {
-			width += OS.GetSystemMetrics (OS.SM_CXVSCROLL);
-			height += OS.GetSystemMetrics (OS.SM_CYVSCROLL);
+			width += getSystemMetrics (OS.SM_CXVSCROLL);
+			height += getSystemMetrics (OS.SM_CYVSCROLL);
 		} else {
-			width += OS.GetSystemMetrics (OS.SM_CXHSCROLL);
-			height += OS.GetSystemMetrics (OS.SM_CYHSCROLL);
+			width += getSystemMetrics (OS.SM_CXHSCROLL);
+			height += getSystemMetrics (OS.SM_CYHSCROLL);
 		}
 	} else {
 		if ((style & SWT.COMMAND) != 0) {
@@ -345,13 +359,13 @@ int computeLeftMargin () {
 			boolean hasImage = image != null, hasText = true;
 			if (hasImage) {
 				if (image != null) {
-					Rectangle rect = DPIUtil.autoScaleBounds(image.getBounds(), this.getZoom(), 100);
+					Rectangle rect = DPIUtil.scaleBounds(image.getBounds(), this.getZoom(), 100);
 					width = rect.width;
 					if (hasText && text.length () != 0) {
-						width += MARGIN * 2;
+						width += DPIUtil.scaleUp(MARGIN * 2, getZoom());;
 					}
 					height = rect.height;
-					extra = MARGIN * 2;
+					extra = DPIUtil.scaleUp(MARGIN * 2, getZoom());;
 				}
 			}
 			if (hasText) {
@@ -365,7 +379,7 @@ int computeLeftMargin () {
 				if (length == 0) {
 					height = Math.max (height, lptm.tmHeight);
 				} else {
-					extra = Math.max (MARGIN * 2, lptm.tmAveCharWidth);
+					extra = Math.max (DPIUtil.scaleUp(MARGIN * 2, getZoom()), lptm.tmAveCharWidth);
 					char [] buffer = text.toCharArray ();
 					RECT rect = new RECT ();
 					int flags = OS.DT_CALCRECT | OS.DT_SINGLELINE;
@@ -373,7 +387,7 @@ int computeLeftMargin () {
 						flags = OS.DT_CALCRECT | OS.DT_WORDBREAK;
 						rect.right = wHint - width - 2 * border;
 						if (isRadioOrCheck()) {
-							rect.right -= CHECK_WIDTH + 3;
+							rect.right -= checkWidth + 3;
 						} else {
 							rect.right -= 6;
 						}
@@ -392,8 +406,8 @@ int computeLeftMargin () {
 				OS.ReleaseDC (handle, hDC);
 			}
 			if (isRadioOrCheck()) {
-				width += CHECK_WIDTH + extra;
-				height = Math.max (height, CHECK_HEIGHT + 3);
+				width += checkWidth + extra;
+				height = Math.max (height, checkHeight + 3);
 			}
 			if ((style & (SWT.PUSH | SWT.TOGGLE)) != 0) {
 				width += 12;  height += 10;
@@ -766,7 +780,7 @@ public void setAlignment (int alignment) {
 	if ((style & SWT.RIGHT) != 0) newBits |= OS.BS_RIGHT;
 	if (imageList != null) {
 		BUTTON_IMAGELIST buttonImageList = new BUTTON_IMAGELIST ();
-		buttonImageList.himl = imageList.getHandle ();
+		buttonImageList.himl = imageList.getHandle(getZoom());
 		if (text.length () == 0) {
 			if ((style & SWT.LEFT) != 0) buttonImageList.uAlign = OS.BUTTON_IMAGELIST_ALIGN_LEFT;
 			if ((style & SWT.CENTER) != 0) buttonImageList.uAlign = OS.BUTTON_IMAGELIST_ALIGN_CENTER;
@@ -1021,7 +1035,7 @@ void updateImageList () {
 		BUTTON_IMAGELIST buttonImageList = new BUTTON_IMAGELIST ();
 		OS.SendMessage (handle, OS.BCM_GETIMAGELIST, 0, buttonImageList);
 		if (imageList != null) imageList.dispose ();
-		imageList = new ImageList (style & SWT.RIGHT_TO_LEFT);
+		imageList = new ImageList (style & SWT.RIGHT_TO_LEFT, getZoom());
 		if (OS.IsWindowEnabled (handle)) {
 			imageList.add (image);
 		} else {
@@ -1029,7 +1043,7 @@ void updateImageList () {
 			disabledImage = new Image (display, image, SWT.IMAGE_DISABLE);
 			imageList.add (disabledImage);
 		}
-		buttonImageList.himl = imageList.getHandle ();
+		buttonImageList.himl = imageList.getHandle(getZoom());
 		OS.SendMessage (handle, OS.BCM_SETIMAGELIST, 0, buttonImageList);
 		/*
 		* Bug in Windows.  Under certain cirumstances yet to be
@@ -1298,10 +1312,10 @@ private int getCheckboxTextOffset(long hdc) {
 	SIZE size = new SIZE();
 
 	if (OS.IsAppThemed ()) {
-		OS.GetThemePartSize(display.hButtonTheme(), hdc, OS.BP_CHECKBOX, OS.CBS_UNCHECKEDNORMAL, null, OS.TS_TRUE, size);
+		OS.GetThemePartSize(display.hButtonTheme(nativeZoom), hdc, OS.BP_CHECKBOX, OS.CBS_UNCHECKEDNORMAL, null, OS.TS_TRUE, size);
 		result += size.cx;
 	} else {
-		result += DPIUtil.autoScaleUpUsingNativeDPI(13);
+		result += DPIUtil.scaleUp(13, nativeZoom);
 	}
 
 	// Windows uses half width of '0' as checkbox-to-text distance.
@@ -1338,7 +1352,7 @@ LRESULT wmNotifyChild (NMHDR hdr, long wParam, long lParam) {
 
 						int inset = 2;
 						int radius = 3;
-						if (useDarkModeExplorerTheme && (OS.WIN32_BUILD >= OS.WIN32_BUILD_WIN11_21H2)) {
+						if (useDarkModeExplorerTheme && OsVersion.IS_WIN11_21H2) {
 							// On Win11, Light theme and Dark theme images have different sizes
 							inset = 1;
 							radius = 4;
@@ -1349,7 +1363,7 @@ LRESULT wmNotifyChild (NMHDR hdr, long wParam, long lParam) {
 						int r = nmcd.right - inset;
 						int b = nmcd.bottom - inset;
 
-						if (OS.WIN32_BUILD >= OS.WIN32_BUILD_WIN11_21H2) {
+						if (OsVersion.IS_WIN11_21H2) {
 							// 'RoundRect' has left/top pixel reserved for border
 							l += 1;
 							t += 1;
@@ -1375,16 +1389,17 @@ LRESULT wmNotifyChild (NMHDR hdr, long wParam, long lParam) {
 						if (image != null) {
 							GCData data = new GCData();
 							data.device = display;
-							GC gc = GC.win32_new (nmcd.hdc, data);
+							GC gc = createNewGC(nmcd.hdc, data);
 
 							int margin = computeLeftMargin();
-							Rectangle imageBounds = DPIUtil.autoScaleBounds(image.getBounds(), this.getZoom(), 100);
+							Rectangle imageBounds = DPIUtil.scaleBounds(image.getBounds(), this.getZoom(), 100);
 							int imageWidth = imageBounds.width;
 							left += (imageWidth + (isRadioOrCheck() ? 2 * MARGIN : MARGIN)); // for SWT.RIGHT_TO_LEFT right and left are inverted
 
 							int x = margin + (isRadioOrCheck() ? radioOrCheckTextPadding : 3);
 							int y = Math.max (0, (nmcd.bottom - imageBounds.height) / 2);
-							gc.drawImage (image, DPIUtil.autoScaleDown(x), DPIUtil.autoScaleDown(y));
+							int zoom = getZoom();
+							gc.drawImage (image, DPIUtil.scaleDown(x, zoom), DPIUtil.scaleDown(y, zoom));
 							gc.dispose ();
 						}
 
@@ -1474,7 +1489,7 @@ static int getThemeStateId(int style, boolean pressed, boolean enabled) {
 	 * The workaround is to use hot image in place of default.
 	 */
 	boolean hot = false;
-	if (OS.WIN32_BUILD >= OS.WIN32_BUILD_WIN11_21H2) {
+	if (OsVersion.IS_WIN11_21H2) {
 		if (!pressed && enabled) {
 			hot = true;
 		}
@@ -1529,7 +1544,7 @@ LRESULT wmDrawChild (long wParam, long lParam) {
 		boolean pressed = ((struct.itemState & OS.ODS_SELECTED) != 0);
 		boolean enabled = getEnabled ();
 		int iStateId = getThemeStateId(style, pressed, enabled);
-		OS.DrawThemeBackground (display.hScrollBarThemeAuto (), struct.hDC, OS.SBP_ARROWBTN, iStateId, rect, null);
+		OS.DrawThemeBackground (display.hScrollBarThemeAuto(nativeZoom), struct.hDC, OS.SBP_ARROWBTN, iStateId, rect, null);
 	} else {
 		int uState = OS.DFCS_SCROLLLEFT;
 		switch (style & (SWT.UP | SWT.DOWN | SWT.LEFT | SWT.RIGHT)) {
@@ -1550,9 +1565,11 @@ private static void handleDPIChange(Widget widget, int newZoom, float scalingFac
 	if (!(widget instanceof Button button)) {
 		return;
 	}
+	//Refresh the CheckSize
+	button.refreshCheckSize(newZoom);
 	// Refresh the image
 	if (button.image != null) {
-		button._setImage(Image.win32_new(button.image, newZoom));
+		button._setImage(button.image);
 		button.updateImageList();
 	}
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 Mat Booth and others.
+ * Copyright (c) 2022, 2025 Mat Booth and others.
  *
  * This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License 2.0
@@ -20,7 +20,6 @@ import org.eclipse.swt.SWTException;
 import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.graphics.ImageData;
 import org.eclipse.swt.graphics.ImageDataProvider;
-import org.eclipse.swt.internal.DPIUtil;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Label;
@@ -42,9 +41,8 @@ import org.eclipse.swt.widgets.Shell;
  * <p>
  * On Linux you may need to run this with GDK_SCALE=2 set in the environment.
  *
- * @see <a href=
- *      "https://github.com/eclipse-platform/eclipse.platform.swt/issues/445">Issue
- *      #445</a> for details.
+ *
+ * For details see: {@code https://github.com/eclipse-platform/eclipse.platform.swt/issues/445}.
  */
 public class Issue0445_HiDPISmoothScaling {
 
@@ -58,7 +56,6 @@ public class Issue0445_HiDPISmoothScaling {
 		shell.setSize(100, 100);
 		shell.setLayout(new GridLayout(1, true));
 
-		System.out.println("Device Zoom: " + DPIUtil.getDeviceZoom());
 
 		ImageDataProvider provider1x = zoom -> {
 			if (zoom == 100) {

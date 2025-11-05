@@ -49,8 +49,9 @@ final class DefaultSWTFontRegistry implements SWTFontRegistry {
 		}
 		if (hFont == 0) hFont = OS.GetStockObject (OS.DEFAULT_GUI_FONT);
 		if (hFont == 0) hFont = OS.GetStockObject (OS.SYSTEM_FONT);
-		Font font = Font.win32_new(device, hFont);
+		Font font = Font.win32_new(device, hFont, zoom);
 		registerFont(KEY_SYSTEM_FONTS, font);
+		registerFont(font.getFontData()[0], font);
 		return font;
 	}
 
@@ -70,8 +71,14 @@ final class DefaultSWTFontRegistry implements SWTFontRegistry {
 		return font;
 	}
 
+	@Override
+	public Font getFont(long fontHandle, int zoom) {
+		return Font.win32_new(device, fontHandle, zoom);
+	}
+
 	private Font registerFont(FontData fontData, Font font) {
-		fontsMap.put(fontData, font);
+		FontData clonedFontData = new FontData(fontData.toString());
+		fontsMap.put(clonedFontData, font);
 		return font;
 	}
 

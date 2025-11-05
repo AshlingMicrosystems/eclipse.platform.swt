@@ -62,7 +62,7 @@ import org.eclipse.swt.internal.win32.*;
  * </p>
  * <dl>
  * <dt><b>Styles:</b></dt>
- * <dd>SINGLE, MULTI, CHECK, FULL_SELECTION, VIRTUAL, NO_SCROLL</dd>
+ * <dd>SINGLE, MULTI, CHECK, FULL_SELECTION, VIRTUAL, NO_SCROLL, NO_SEARCH</dd>
  * <dt><b>Events:</b></dt>
  * <dd>Selection, DefaultSelection, Collapse, Expand, SetData, MeasureItem, EraseItem, PaintItem, EmptinessChanged</dd>
  * </dl>
@@ -90,7 +90,7 @@ public class Tree extends Composite {
 	int sortDirection;
 	boolean dragStarted, gestureCompleted, insertAfter, shrink, ignoreShrink;
 	boolean ignoreSelect, ignoreExpand, ignoreDeselect, ignoreResize;
-	boolean lockSelection, oldSelected, newSelected, ignoreColumnMove;
+	boolean lockSelection, oldSelected, newSelected, ignoreColumnMove, ignoreColumnResize;
 	boolean linesVisible, customDraw, painted, ignoreItemHeight;
 	boolean ignoreCustomDraw, ignoreDrawForeground, ignoreDrawBackground, ignoreDrawFocus;
 	boolean ignoreDrawSelection, ignoreDrawHot, ignoreFullSelection, explorerTheme;
@@ -418,6 +418,7 @@ LRESULT CDDS_ITEMPOSTPAINT (NMTVCUSTOMDRAW nmcd, long wParam, long lParam) {
 	if ((style & SWT.FULL_SELECTION) != 0 || findImageControl () != null || ignoreDrawSelection || explorerTheme) {
 		OS.SetBkMode (hDC, OS.TRANSPARENT);
 	}
+	int zoom = getZoom();
 	boolean selected = isItemSelected (nmcd);
 	boolean hot = explorerTheme && (nmcd.uItemState & OS.CDIS_HOT) != 0;
 	if (OS.IsWindowEnabled (handle)) {
@@ -496,7 +497,7 @@ LRESULT CDDS_ITEMPOSTPAINT (NMTVCUSTOMDRAW nmcd, long wParam, long lParam) {
 							}
 						}
 						draw = false;
-						long hTheme = OS.OpenThemeData (handle, Display.TREEVIEW);
+						long hTheme = OS.OpenThemeData (handle, Display.TREEVIEW, getZoom());
 						int iStateId = selected ? OS.TREIS_SELECTED : OS.TREIS_HOT;
 						if (OS.GetFocus () != handle && selected && !hot) iStateId = OS.TREIS_SELECTEDNOTFOCUS;
 						OS.DrawThemeBackground (hTheme, hDC, OS.TVP_TREEITEM, iStateId, pRect, pClipRect);
@@ -523,14 +524,14 @@ LRESULT CDDS_ITEMPOSTPAINT (NMTVCUSTOMDRAW nmcd, long wParam, long lParam) {
 							}
 							if (image != null) {
 								Rectangle bounds = image.getBounds (); // Points
-								if (size == null) size = DPIUtil.autoScaleDown (getImageSize ()); // To Points
+								if (size == null) size = DPIUtil.scaleDown (getImageSize (), zoom); // To Points
 								if (!ignoreDrawForeground) {
 									GCData data = new GCData();
 									data.device = display;
-									GC gc = GC.win32_new (hDC, data);
+									GC gc = createNewGC(hDC, data);
 									RECT iconRect = item.getBounds (index, false, true, false, false, true, hDC); // Pixels
-									gc.setClipping (DPIUtil.autoScaleDown(new Rectangle(iconRect.left, iconRect.top, iconRect.right - iconRect.left, iconRect.bottom - iconRect.top)));
-									gc.drawImage (image, 0, 0, bounds.width, bounds.height, DPIUtil.autoScaleDown(iconRect.left), DPIUtil.autoScaleDown(iconRect.top), size.x, size.y);
+									gc.setClipping (DPIUtil.scaleDown(new Rectangle(iconRect.left, iconRect.top, iconRect.right - iconRect.left, iconRect.bottom - iconRect.top), zoom));
+									gc.drawImage (image, 0, 0, bounds.width, bounds.height, DPIUtil.scaleDown(iconRect.left, zoom), DPIUtil.scaleDown(iconRect.top, zoom), size.x, size.y);
 									OS.SelectClipRgn (hDC, 0);
 									gc.dispose ();
 								}
@@ -625,7 +626,7 @@ LRESULT CDDS_ITEMPOSTPAINT (NMTVCUSTOMDRAW nmcd, long wParam, long lParam) {
 						}
 						data.font = item.getFont (index);
 						data.uiState = (int)OS.SendMessage (handle, OS.WM_QUERYUISTATE, 0, 0);
-						GC gc = GC.win32_new (hDC, data);
+						GC gc = createNewGC(hDC, data);
 						Event event = new Event ();
 						event.item = item;
 						event.index = index;
@@ -645,9 +646,9 @@ LRESULT CDDS_ITEMPOSTPAINT (NMTVCUSTOMDRAW nmcd, long wParam, long lParam) {
 								}
 							}
 						}
-						Rectangle boundsInPixels = new Rectangle (cellRect.left, cellRect.top, cellRect.right - cellRect.left, cellRect.bottom - cellRect.top);
-						event.setBoundsInPixels (boundsInPixels);
-						gc.setClipping (DPIUtil.autoScaleDown (boundsInPixels));
+						Rectangle bounds = DPIUtil.scaleDown(new Rectangle (cellRect.left, cellRect.top, cellRect.right - cellRect.left, cellRect.bottom - cellRect.top), getZoom());
+						event.setBounds (bounds);
+						gc.setClipping (bounds);
 						sendEvent (SWT.EraseItem, event);
 						event.gc = null;
 						int newTextClr = data.foreground;
@@ -709,7 +710,7 @@ LRESULT CDDS_ITEMPOSTPAINT (NMTVCUSTOMDRAW nmcd, long wParam, long lParam) {
 												backgroundRect = selectionRect;
 											}
 										}
-										long hTheme = OS.OpenThemeData (handle, Display.TREEVIEW);
+										long hTheme = OS.OpenThemeData(handle, Display.TREEVIEW, getZoom());
 										int iStateId = selected ? OS.TREIS_SELECTED : OS.TREIS_HOT;
 										if (OS.GetFocus () != handle && selected && !hot) iStateId = OS.TREIS_SELECTEDNOTFOCUS;
 										OS.DrawThemeBackground (hTheme, hDC, OS.TVP_TREEITEM, iStateId, pRect, backgroundRect);
@@ -761,20 +762,20 @@ LRESULT CDDS_ITEMPOSTPAINT (NMTVCUSTOMDRAW nmcd, long wParam, long lParam) {
 					int offset = i != 0 ? INSET : INSET + 2;
 					if (image != null) {
 						Rectangle bounds = image.getBounds (); // Points
-						if (size == null) size = DPIUtil.autoScaleDown (getImageSize ()); // To Points
+						if (size == null) size = DPIUtil.scaleDown (getImageSize (), zoom); // To Points
 						if (!ignoreDrawForeground) {
 							//int y1 = rect.top + (index == 0 ? (getItemHeight () - size.y) / 2 : 0);
-							int y1 = rect.top + DPIUtil.autoScaleUp((getItemHeight () - size.y) / 2);
+							int y1 = rect.top + DPIUtil.scaleUp((getItemHeight () - size.y) / 2, zoom);
 							int x1 = Math.max (rect.left, rect.left - inset + 1);
 							GCData data = new GCData();
 							data.device = display;
-							GC gc = GC.win32_new (hDC, data);
-							gc.setClipping (DPIUtil.autoScaleDown(new Rectangle(x1, rect.top, rect.right - x1, rect.bottom - rect.top)));
-							gc.drawImage (image, 0, 0, bounds.width, bounds.height, DPIUtil.autoScaleDown(x1), DPIUtil.autoScaleDown(y1), size.x, size.y);
+							GC gc = createNewGC(hDC, data);
+							gc.setClipping (DPIUtil.scaleDown(new Rectangle(x1, rect.top, rect.right - x1, rect.bottom - rect.top), zoom));
+							gc.drawImage (image, 0, 0, bounds.width, bounds.height, DPIUtil.scaleDown(x1, zoom), DPIUtil.scaleDown(y1, zoom), size.x, size.y);
 							OS.SelectClipRgn (hDC, 0);
 							gc.dispose ();
 						}
-						OS.SetRect (rect, rect.left + DPIUtil.autoScaleUp(size.x) + offset, rect.top, rect.right - inset, rect.bottom);
+						OS.SetRect (rect, rect.left + DPIUtil.scaleUp(size.x, zoom) + offset, rect.top, rect.right - inset, rect.bottom);
 					} else {
 						if (i == 0) {
 							if (OS.SendMessage (handle, OS.TVM_GETIMAGELIST, OS.TVSIL_NORMAL, 0) != 0) {
@@ -841,7 +842,7 @@ LRESULT CDDS_ITEMPOSTPAINT (NMTVCUSTOMDRAW nmcd, long wParam, long lParam) {
 					if (clrTextBk != -1) data.background = clrTextBk;
 				}
 				data.uiState = (int)OS.SendMessage (handle, OS.WM_QUERYUISTATE, 0, 0);
-				GC gc = GC.win32_new (hDC, data);
+				GC gc = createNewGC(hDC, data);
 				Event event = new Event ();
 				event.item = item;
 				event.index = index;
@@ -863,11 +864,11 @@ LRESULT CDDS_ITEMPOSTPAINT (NMTVCUSTOMDRAW nmcd, long wParam, long lParam) {
 						}
 					}
 				}
-				event.setBoundsInPixels(new Rectangle(itemRect.left, itemRect.top, itemRect.right - itemRect.left, itemRect.bottom - itemRect.top));
+				event.setBounds(DPIUtil.scaleDown(new Rectangle(itemRect.left, itemRect.top, itemRect.right - itemRect.left, itemRect.bottom - itemRect.top), getZoom()));
 				RECT cellRect = item.getBounds (index, true, true, true, true, true, hDC);
 				int cellWidth = cellRect.right - cellRect.left;
 				int cellHeight = cellRect.bottom - cellRect.top;
-				gc.setClipping (DPIUtil.autoScaleDown(new Rectangle(cellRect.left, cellRect.top, cellWidth, cellHeight)));
+				gc.setClipping (DPIUtil.scaleDown(new Rectangle(cellRect.left, cellRect.top, cellWidth, cellHeight), zoom));
 				sendEvent (SWT.PaintItem, event);
 				if (data.focusDrawn) focusRect = null;
 				event.gc = null;
@@ -1030,7 +1031,7 @@ LRESULT CDDS_ITEMPREPAINT (NMTVCUSTOMDRAW nmcd, long wParam, long lParam) {
 		Rectangle boundsInPixels = null;
 		if (hooks (SWT.MeasureItem)) {
 			measureEvent = sendMeasureItemEvent (item, index, hDC, selected ? SWT.SELECTED : 0);
-			boundsInPixels = measureEvent.getBoundsInPixels ();
+			boundsInPixels = DPIUtil.scaleUp(measureEvent.getBounds(), getZoom());
 			if (isDisposed () || item.isDisposed ()) return null;
 		}
 		selectionForeground = -1;
@@ -1063,7 +1064,7 @@ LRESULT CDDS_ITEMPREPAINT (NMTVCUSTOMDRAW nmcd, long wParam, long lParam) {
 			}
 			data.uiState = (int)OS.SendMessage (handle, OS.WM_QUERYUISTATE, 0, 0);
 			data.font = item.getFont (index);
-			GC gc = GC.win32_new (hDC, data);
+			GC gc = createNewGC(hDC, data);
 			Event event = new Event ();
 			event.index = index;
 			event.item = item;
@@ -1084,9 +1085,9 @@ LRESULT CDDS_ITEMPREPAINT (NMTVCUSTOMDRAW nmcd, long wParam, long lParam) {
 					}
 				}
 			}
-			Rectangle boundsInPixels2 = new Rectangle (cellRect.left, cellRect.top, cellRect.right - cellRect.left, cellRect.bottom - cellRect.top);
-			event.setBoundsInPixels (boundsInPixels2);
-			gc.setClipping (DPIUtil.autoScaleDown (boundsInPixels2));
+			Rectangle bounds = DPIUtil.scaleDown(new Rectangle (cellRect.left, cellRect.top, cellRect.right - cellRect.left, cellRect.bottom - cellRect.top), getZoom());
+			event.setBounds (bounds);
+			gc.setClipping (bounds);
 			sendEvent (SWT.EraseItem, event);
 			event.gc = null;
 			int newTextClr = data.foreground;
@@ -1139,7 +1140,7 @@ LRESULT CDDS_ITEMPREPAINT (NMTVCUSTOMDRAW nmcd, long wParam, long lParam) {
 						}
 						pRect.left -= EXPLORER_EXTRA;
 						pClipRect.left -= EXPLORER_EXTRA;
-						long hTheme = OS.OpenThemeData (handle, Display.TREEVIEW);
+						long hTheme = OS.OpenThemeData (handle, Display.TREEVIEW, getZoom());
 						int iStateId = selected ? OS.TREIS_SELECTED : OS.TREIS_HOT;
 						if (OS.GetFocus () != handle && selected && !hot) iStateId = OS.TREIS_SELECTEDNOTFOCUS;
 						OS.DrawThemeBackground (hTheme, hDC, OS.TVP_TREEITEM, iStateId, pRect, pClipRect);
@@ -1859,10 +1860,10 @@ long CompareFunc (long lParam1, long lParam2, long lParamSort) {
 	width += border * 2;
 	height += border * 2;
 	if ((style & SWT.V_SCROLL) != 0) {
-		width += OS.GetSystemMetrics (OS.SM_CXVSCROLL);
+		width += getSystemMetrics (OS.SM_CXVSCROLL);
 	}
 	if ((style & SWT.H_SCROLL) != 0) {
-		height += OS.GetSystemMetrics (OS.SM_CYHSCROLL);
+		height += getSystemMetrics (OS.SM_CYHSCROLL);
 	}
 	return new Point (width, height);
 }
@@ -2803,14 +2804,14 @@ boolean findCell (int x, int y, TreeItem [] item, int [] index, RECT [] cellRect
 						int detail = (state & OS.TVIS_SELECTED) != 0 ? SWT.SELECTED : 0;
 						Event event = sendMeasureItemEvent (item [0], order [index [0]], hDC, detail);
 						if (isDisposed () || item [0].isDisposed ()) break;
-						Rectangle boundsInPixels = event.getBoundsInPixels();
+						Rectangle boundsInPixels = DPIUtil.scaleUp(event.getBounds(), getZoom());
 						itemRect [0] = new RECT ();
 						itemRect [0].left = boundsInPixels.x;
 						itemRect [0].right = boundsInPixels.x + boundsInPixels.width;
 						itemRect [0].top = boundsInPixels.y;
 						itemRect [0].bottom = boundsInPixels.y + boundsInPixels.height;
 					} else {
-						itemRect [0] = item [0].getBounds (order [index [0]], true, false, false, false, false, hDC);
+						itemRect [0] = item [0].getBounds (order [index [0]], true, true, false, false, false, hDC);
 					}
 					if (itemRect [0].right > cellRect [0].right) found = true;
 					quit = true;
@@ -2959,7 +2960,7 @@ TreeItem getFocusItem () {
  */
 public int getGridLineWidth () {
 	checkWidget ();
-	return DPIUtil.autoScaleDown(getGridLineWidthInPixels ());
+	return DPIUtil.scaleDown(getGridLineWidthInPixels (), getZoom());
 }
 
 int getGridLineWidthInPixels () {
@@ -3020,7 +3021,7 @@ private int getHeaderForegroundPixel() {
  */
 public int getHeaderHeight () {
 	checkWidget ();
-	return DPIUtil.autoScaleDown(getHeaderHeightInPixels ());
+	return DPIUtil.scaleDown(getHeaderHeightInPixels (), getZoom());
 }
 
 int getHeaderHeightInPixels () {
@@ -3286,7 +3287,7 @@ TreeItem getItem (NMTVCUSTOMDRAW nmcd) {
 public TreeItem getItem (Point point) {
 	checkWidget ();
 	if (point == null) error (SWT.ERROR_NULL_ARGUMENT);
-	return getItemInPixels(DPIUtil.autoScaleUp(point));
+	return getItemInPixels(DPIUtil.scaleUp(point, getZoom()));
 }
 
 TreeItem getItemInPixels (Point point) {
@@ -3360,7 +3361,7 @@ int getItemCount (long hItem) {
  */
 public int getItemHeight () {
 	checkWidget ();
-	return DPIUtil.autoScaleDown(getItemHeightInPixels());
+	return DPIUtil.scaleDown(getItemHeightInPixels(), getZoom());
 }
 
 int getItemHeightInPixels () {
@@ -3729,7 +3730,7 @@ boolean hitTestSelection (long hItem, int x, int y) {
 	int state = (int)OS.SendMessage (handle, OS.TVM_GETITEMSTATE, hItem, OS.TVIS_SELECTED);
 	int detail = (state & OS.TVIS_SELECTED) != 0 ? SWT.SELECTED : 0;
 	Event event = sendMeasureItemEvent (item, order [index [0]], hDC, detail);
-	if (event.getBoundsInPixels ().contains (x, y)) result = true;
+	if (DPIUtil.scaleUp(event.getBounds(), getZoom()).contains (x, y)) result = true;
 	if (newFont != 0) OS.SelectObject (hDC, oldFont);
 	OS.ReleaseDC (handle, hDC);
 //	if (isDisposed () || item.isDisposed ()) return false;
@@ -3739,8 +3740,8 @@ boolean hitTestSelection (long hItem, int x, int y) {
 int imageIndex (Image image, int index) {
 	if (image == null) return OS.I_IMAGENONE;
 	if (imageList == null) {
-		Rectangle bounds = DPIUtil.autoScaleBounds(image.getBounds(), this.getZoom(), 100);
-		imageList = display.getImageList (style & SWT.RIGHT_TO_LEFT, bounds.width, bounds.height);
+		Rectangle bounds = DPIUtil.scaleBounds(image.getBounds(), this.getZoom(), 100);
+		imageList = display.getImageList (style & SWT.RIGHT_TO_LEFT, bounds.width, bounds.height, getZoom());
 	}
 	int imageIndex = imageList.indexOf (image);
 	if (imageIndex == -1) imageIndex = imageList.add (image);
@@ -3750,7 +3751,7 @@ int imageIndex (Image image, int index) {
 		* times, Windows does work making this operation slow.  The fix
 		* is to test for the same image list before setting the new one.
 		*/
-		long hImageList = imageList.getHandle ();
+		long hImageList = imageList.getHandle(getZoom());
 		long hOldImageList = OS.SendMessage (handle, OS.TVM_GETIMAGELIST, OS.TVSIL_NORMAL, 0);
 		if (hOldImageList != hImageList) {
 			OS.SendMessage (handle, OS.TVM_SETIMAGELIST, OS.TVSIL_NORMAL, hImageList);
@@ -3763,11 +3764,11 @@ int imageIndex (Image image, int index) {
 int imageIndexHeader (Image image) {
 	if (image == null) return OS.I_IMAGENONE;
 	if (headerImageList == null) {
-		Rectangle bounds = DPIUtil.autoScaleBounds(image.getBounds(), this.getZoom(), 100);
-		headerImageList = display.getImageList (style & SWT.RIGHT_TO_LEFT, bounds.width, bounds.height);
+		Rectangle bounds = DPIUtil.scaleBounds(image.getBounds(), this.getZoom(), 100);
+		headerImageList = display.getImageList (style & SWT.RIGHT_TO_LEFT, bounds.width, bounds.height, getZoom());
 		int index = headerImageList.indexOf (image);
 		if (index == -1) index = headerImageList.add (image);
-		long hImageList = headerImageList.getHandle ();
+		long hImageList = headerImageList.getHandle(getZoom());
 		if (hwndHeader != 0) {
 			OS.SendMessage (hwndHeader, OS.HDM_SETIMAGELIST, 0, hImageList);
 		}
@@ -4523,13 +4524,13 @@ Event sendEraseItemEvent (TreeItem item, NMTTCUSTOMDRAW nmcd, int column, RECT c
 	data.background = OS.GetBkColor (nmcd.hdc);
 	data.font = item.getFont (column);
 	data.uiState = (int)OS.SendMessage (handle, OS.WM_QUERYUISTATE, 0, 0);
-	GC gc = GC.win32_new (nmcd.hdc, data);
+	GC gc = createNewGC(nmcd.hdc, data);
 	Event event = new Event ();
 	event.item = item;
 	event.index = column;
 	event.gc = gc;
 	event.detail |= SWT.FOREGROUND;
-	event.setBoundsInPixels(new Rectangle(cellRect.left, cellRect.top, cellRect.right - cellRect.left, cellRect.bottom - cellRect.top));
+	event.setBounds(DPIUtil.scaleDown(new Rectangle(cellRect.left, cellRect.top, cellRect.right - cellRect.left, cellRect.bottom - cellRect.top), getZoom()));
 	//gc.setClipping (event.x, event.y, event.width, event.height);
 	sendEvent (SWT.EraseItem, event);
 	event.gc = null;
@@ -4545,19 +4546,19 @@ Event sendMeasureItemEvent (TreeItem item, int index, long hDC, int detail) {
 	GCData data = new GCData ();
 	data.device = display;
 	data.font = item.getFont (index);
-	GC gc = GC.win32_new (hDC, data);
+	GC gc = createNewGC(hDC, data);
 	Event event = new Event ();
 	event.item = item;
 	event.gc = gc;
 	event.index = index;
-	event.setBoundsInPixels(new Rectangle(itemRect.left, itemRect.top, itemRect.right - itemRect.left, itemRect.bottom - itemRect.top));
+	event.setBounds(DPIUtil.scaleDown(new Rectangle(itemRect.left, itemRect.top, itemRect.right - itemRect.left, itemRect.bottom - itemRect.top), getZoom()));
 	event.detail = detail;
 	sendEvent (SWT.MeasureItem, event);
 	event.gc = null;
 	gc.dispose ();
 	OS.RestoreDC (hDC, nSavedDC);
 	if (isDisposed () || item.isDisposed ()) return null;
-	Rectangle rect = event.getBoundsInPixels ();
+	Rectangle rect = DPIUtil.scaleUp(event.getBounds(), getZoom());
 	if (hwndHeader != 0) {
 		if (columnCount == 0) {
 			if (rect.x + rect.width > scrollWidth) {
@@ -4579,13 +4580,13 @@ Event sendPaintItemEvent (TreeItem item, NMTTCUSTOMDRAW nmcd, int column, RECT i
 	data.foreground = OS.GetTextColor (nmcd.hdc);
 	data.background = OS.GetBkColor (nmcd.hdc);
 	data.uiState = (int)OS.SendMessage (handle, OS.WM_QUERYUISTATE, 0, 0);
-	GC gc = GC.win32_new (nmcd.hdc, data);
+	GC gc = createNewGC(nmcd.hdc, data);
 	Event event = new Event ();
 	event.item = item;
 	event.index = column;
 	event.gc = gc;
 	event.detail |= SWT.FOREGROUND;
-	event.setBoundsInPixels(new Rectangle(itemRect.left, itemRect.top, itemRect.right - itemRect.left, itemRect.bottom - itemRect.top));
+	event.setBounds(DPIUtil.scaleDown(new Rectangle(itemRect.left, itemRect.top, itemRect.right - itemRect.left, itemRect.bottom - itemRect.top), getZoom()));
 	//gc.setClipping (cellRect.left, cellRect.top, cellWidth, cellHeight);
 	sendEvent (SWT.PaintItem, event);
 	event.gc = null;
@@ -4662,7 +4663,7 @@ void setCursor () {
 	* is IDC_ARROW.
 	*/
 	Cursor cursor = findCursor ();
-	long hCursor = cursor == null ? OS.LoadCursor (0, OS.IDC_ARROW) : cursor.handle;
+	long hCursor = cursor == null ? OS.LoadCursor (0, OS.IDC_ARROW) : Cursor.win32_getHandle(cursor, getNativeZoom());
 	OS.SetCursor (hCursor);
 }
 
@@ -4780,14 +4781,14 @@ void setCheckboxImageList () {
 		 * artifacts, limit the rectangle to actual checkbox bitmap size.
 		 */
 		SIZE size = new SIZE();
-		OS.GetThemePartSize(display.hButtonTheme(), memDC, OS.BP_CHECKBOX, 0, null, OS.TS_TRUE, size);
+		OS.GetThemePartSize(display.hButtonTheme(nativeZoom), memDC, OS.BP_CHECKBOX, 0, null, OS.TS_TRUE, size);
 		itemWidth = Math.min (size.cx, itemWidth);
 		itemHeight = Math.min (size.cy, itemHeight);
 	}
 	int left = (width - itemWidth) / 2, top = (height - itemHeight) / 2 + 1;
 	OS.SetRect (rect, left + width, top, left + width + itemWidth, top + itemHeight);
 	if (OS.IsAppThemed ()) {
-		long hTheme = display.hButtonTheme ();
+		long hTheme = display.hButtonTheme(nativeZoom);
 		OS.DrawThemeBackground (hTheme, memDC, OS.BP_CHECKBOX, OS.CBS_UNCHECKEDNORMAL, rect, null);
 		rect.left += width;  rect.right += width;
 		OS.DrawThemeBackground (hTheme, memDC, OS.BP_CHECKBOX, OS.CBS_CHECKEDNORMAL, rect, null);
@@ -5049,7 +5050,7 @@ void setScrollWidth (int width) {
 	if (playout.prc != 0) OS.HeapFree (hHeap, 0, playout.prc);
 	if (playout.pwpos != 0) OS.HeapFree (hHeap, 0, playout.pwpos);
 	OS.SetWindowPos (hwndHeader, OS.HWND_TOP, pos.x - left, pos.y, pos.cx + left, pos.cy, OS.SWP_NOACTIVATE);
-	int w = pos.cx + (columnCount == 0 && width == 0 ? 0 : OS.GetSystemMetrics (OS.SM_CXVSCROLL));
+	int w = pos.cx + (columnCount == 0 && width == 0 ? 0 : getSystemMetrics (OS.SM_CXVSCROLL));
 	int h = rect.bottom - rect.top - pos.cy;
 	boolean oldIgnore = ignoreResize;
 	ignoreResize = true;
@@ -5370,7 +5371,7 @@ public void setTopItem (TreeItem item) {
  * In a Tree without imageList, the indent also controls the chevron (glyph) size.
  */
 private void calculateAndApplyIndentSize() {
-	int indent = DPIUtil.autoScaleUpUsingNativeDPI(DEFAULT_INDENT);
+	int indent = DPIUtil.scaleUp(DEFAULT_INDENT, nativeZoom);
 	OS.SendMessage(handle, OS.TVM_SETINDENT, indent, 0);
 }
 
@@ -5728,7 +5729,7 @@ void updateImageList () {
 	* times, Windows does work making this operation slow.  The fix
 	* is to test for the same image list before setting the new one.
 	*/
-	long hImageList = i == items.length ? 0 : imageList.getHandle ();
+	long hImageList = i == items.length ? 0 : imageList.getHandle(getZoom());
 	long hOldImageList = OS.SendMessage (handle, OS.TVM_GETIMAGELIST, OS.TVSIL_NORMAL, 0);
 	if (hImageList != hOldImageList) {
 		OS.SendMessage (handle, OS.TVM_SETIMAGELIST, OS.TVSIL_NORMAL, hImageList);
@@ -5751,7 +5752,8 @@ void updateMenuLocation (Event event) {
 		y = Math.min (y, clientArea.y + clientArea.height);
 	}
 	Point pt = toDisplayInPixels (x, y);
-	event.setLocationInPixels(pt.x, pt.y);
+	int zoom = getZoom();
+	event.setLocation(DPIUtil.scaleDown(pt.x, zoom), DPIUtil.scaleDown(pt.y, zoom));
 }
 
 @Override
@@ -5791,7 +5793,7 @@ void updateOrientation () {
 	if (imageList != null) {
 		Point size = imageList.getImageSize ();
 		display.releaseImageList (imageList);
-		imageList = display.getImageList (style & SWT.RIGHT_TO_LEFT, size.x, size.y);
+		imageList = display.getImageList (style & SWT.RIGHT_TO_LEFT, size.x, size.y, getZoom());
 		for (TreeItem item : items) {
 			if (item != null) {
 				Image image = item.image;
@@ -5801,14 +5803,14 @@ void updateOrientation () {
 				}
 			}
 		}
-		long hImageList = imageList.getHandle ();
+		long hImageList = imageList.getHandle(getZoom());
 		OS.SendMessage (handle, OS.TVM_SETIMAGELIST, OS.TVSIL_NORMAL, hImageList);
 	}
 	if (hwndHeader != 0) {
 		if (headerImageList != null) {
 			Point size = headerImageList.getImageSize ();
 			display.releaseImageList (headerImageList);
-			headerImageList = display.getImageList (style & SWT.RIGHT_TO_LEFT, size.x, size.y);
+			headerImageList = display.getImageList (style & SWT.RIGHT_TO_LEFT, size.x, size.y, getZoom());
 			if (columns != null) {
 				for (int i = 0; i < columns.length; i++) {
 					TreeColumn column = columns[i];
@@ -5829,7 +5831,7 @@ void updateOrientation () {
 					}
 				}
 			}
-			long hImageListHeader = headerImageList.getHandle ();
+			long hImageListHeader = headerImageList.getHandle(getZoom());
 			OS.SendMessage (hwndHeader, OS.HDM_SETIMAGELIST, 0, hImageListHeader);
 		}
 	}
@@ -7150,7 +7152,7 @@ LRESULT WM_PAINT (long wParam, long lParam) {
 				if (hooksPaint) {
 					Event event = new Event ();
 					event.gc = gc;
-					event.setBoundsInPixels(new Rectangle(ps.left, ps.top, ps.right - ps.left, ps.bottom - ps.top));
+					event.setBounds(DPIUtil.scaleDown(new Rectangle(ps.left, ps.top, ps.right - ps.left, ps.bottom - ps.top), getZoom()));
 					sendEvent (SWT.Paint, event);
 					// widget could be disposed at this point
 					event.gc = null;
@@ -7395,6 +7397,8 @@ LRESULT wmNotify (NMHDR hdr, long wParam, long lParam) {
 	if (hdr.hwndFrom == itemToolTipHandle && itemToolTipHandle != 0) {
 		LRESULT result = wmNotifyToolTip (hdr, wParam, lParam);
 		if (result != null) return result;
+	} else if (hdr.code == OS.TTN_SHOW) {
+		return positionTooltip(hdr, wParam, lParam, false);
 	}
 	if (hdr.hwndFrom == hwndHeader && hwndHeader != 0) {
 		LRESULT result = wmNotifyHeader (hdr, wParam, lParam);
@@ -7882,7 +7886,7 @@ LRESULT wmNotifyHeader (NMHDR hdr, long wParam, long lParam) {
 							 * Sort indicator size needs to scale as per the Native Windows OS DPI level
 							 * when header is custom drawn. For more details refer bug 537097.
 							 */
-							int leg = DPIUtil.autoScaleUpUsingNativeDPI(3);
+							int leg = DPIUtil.scaleUp(3, nativeZoom);
 							if (sortDirection == SWT.UP) {
 								OS.Polyline(nmcd.hdc, new int[] {center-leg, 1+leg, center+1, 0}, 2);
 								OS.Polyline(nmcd.hdc, new int[] {center+leg, 1+leg, center-1, 0}, 2);
@@ -7925,10 +7929,11 @@ LRESULT wmNotifyHeader (NMHDR hdr, long wParam, long lParam) {
 						if (columns[i].image != null) {
 							GCData data = new GCData();
 							data.device = display;
-							GC gc = GC.win32_new (nmcd.hdc, data);
-							Rectangle imageBounds = DPIUtil.autoScaleBounds(columns[i].image.getBounds(), this.getZoom(), 100);
+							GC gc = createNewGC(nmcd.hdc, data);
+							int zoom = getZoom();
+							Rectangle imageBounds = DPIUtil.scaleBounds(columns[i].image.getBounds(), zoom, 100);
 							int y = Math.max (0, (nmcd.bottom - imageBounds.height) / 2);
-							gc.drawImage (columns[i].image, DPIUtil.autoScaleDown(x), DPIUtil.autoScaleDown(y));
+							gc.drawImage (columns[i].image, DPIUtil.scaleDown(x, zoom), DPIUtil.scaleDown(y, zoom));
 							x += imageBounds.width + 12;
 							gc.dispose ();
 						}
@@ -8055,7 +8060,7 @@ LRESULT wmNotifyHeader (NMHDR hdr, long wParam, long lParam) {
 					int newX = rect.left + deltaX;
 					rect.right = Math.max (rect.right, rect.left + Math.abs (deltaX));
 					if (explorerTheme || (findImageControl () != null || hooks (SWT.MeasureItem) || hooks (SWT.EraseItem) || hooks (SWT.PaintItem))) {
-						rect.left -= OS.GetSystemMetrics (OS.SM_CXFOCUSBORDER);
+						rect.left -= getSystemMetrics (OS.SM_CXFOCUSBORDER);
 						OS.InvalidateRect (handle, rect, true);
 						OS.OffsetRect (rect, deltaX, 0);
 						OS.InvalidateRect (handle, rect, true);
@@ -8087,22 +8092,24 @@ LRESULT wmNotifyHeader (NMHDR hdr, long wParam, long lParam) {
 						int flags = OS.RDW_UPDATENOW | OS.RDW_ALLCHILDREN;
 						OS.RedrawWindow (handle, null, 0, flags);
 					}
-					TreeColumn column = columns [phdn.iItem];
-					if (column != null) {
-						column.updateToolTip (phdn.iItem);
-						column.sendEvent (SWT.Resize);
-						if (isDisposed ()) return LRESULT.ZERO;
-						TreeColumn [] newColumns = new TreeColumn [columnCount];
-						System.arraycopy (columns, 0, newColumns, 0, columnCount);
-						int [] order = getColumnOrder();
-						boolean moved = false;
-						for (int i=0; i<columnCount; i++) {
-							TreeColumn nextColumn = newColumns [order [i]];
-							if (moved && !nextColumn.isDisposed ()) {
-								nextColumn.updateToolTip (order [i]);
-								nextColumn.sendEvent (SWT.Move);
+					if (!ignoreColumnResize) {
+						TreeColumn column = columns [phdn.iItem];
+						if (column != null) {
+							column.updateToolTip (phdn.iItem);
+							column.sendEvent (SWT.Resize);
+							if (isDisposed ()) return LRESULT.ZERO;
+							TreeColumn [] newColumns = new TreeColumn [columnCount];
+							System.arraycopy (columns, 0, newColumns, 0, columnCount);
+							int [] order = getColumnOrder();
+							boolean moved = false;
+							for (int i=0; i<columnCount; i++) {
+								TreeColumn nextColumn = newColumns [order [i]];
+								if (moved && !nextColumn.isDisposed ()) {
+									nextColumn.updateToolTip (order [i]);
+									nextColumn.sendEvent (SWT.Move);
+								}
+								if (nextColumn == column) moved = true;
 							}
-							if (nextColumn == column) moved = true;
 						}
 					}
 				}
@@ -8140,29 +8147,92 @@ LRESULT wmNotifyToolTip (NMHDR hdr, long wParam, long lParam) {
 			return wmNotifyToolTip (nmcd, lParam);
 		}
 		case OS.TTN_SHOW: {
-			LRESULT result = super.wmNotify (hdr, wParam, lParam);
-			if (result != null) return result;
-			int pos = OS.GetMessagePos ();
-			POINT pt = new POINT();
-			OS.POINTSTOPOINT (pt, pos);
-			OS.ScreenToClient (handle, pt);
-			int [] index = new int [1];
-			TreeItem [] item = new TreeItem [1];
-			RECT [] cellRect = new RECT [1], itemRect = new RECT [1];
-			if (findCell (pt.x, pt.y, item, index, cellRect, itemRect)) {
-				RECT toolRect = toolTipRect (itemRect [0]);
-				OS.MapWindowPoints (handle, 0, toolRect, 2);
-				int width = toolRect.right - toolRect.left;
-				int height = toolRect.bottom - toolRect.top;
-				int flags = OS.SWP_NOACTIVATE | OS.SWP_NOZORDER | OS.SWP_NOSIZE;
-				if (isCustomToolTip ()) flags &= ~OS.SWP_NOSIZE;
-				OS.SetWindowPos (itemToolTipHandle, 0, toolRect.left, toolRect.top, width, height, flags);
-				return LRESULT.ONE;
-			}
-			return result;
+			return positionTooltip(hdr, wParam, lParam, true);
 		}
 	}
 	return null;
+}
+
+private LRESULT positionTooltip(NMHDR hdr, long wParam, long lParam, boolean managedTooltip) {
+	LRESULT result = super.wmNotify (hdr, wParam, lParam);
+	if (result != null) return result;
+	int flags = OS.SWP_NOACTIVATE | OS.SWP_NOZORDER | OS.SWP_NOSIZE;
+	if (isCustomToolTip () || !managedTooltip) flags &= ~OS.SWP_NOSIZE;
+	int pos = OS.GetMessagePos ();
+	POINT pt = new POINT();
+	OS.POINTSTOPOINT (pt, pos);
+	OS.ScreenToClient (handle, pt);
+	int [] index = new int [1];
+	TreeItem [] item = new TreeItem [1];
+	RECT [] cellRect = new RECT [1], itemRect = new RECT [1];
+	if (findCell (pt.x, pt.y, item, index, cellRect, itemRect)) {
+		RECT toolRect = managedTooltip ? toolTipRect(itemRect [0]) : itemRect [0];
+		OS.MapWindowPoints (handle, 0, toolRect, 2);
+		// Retrieve the monitor containing the cursor position, as tool tip placement
+		// must occur on the same monitor to avoid potential infinite loops. When a tool tip
+		// appears on a different monitor than the cursor, the operating system may
+		// attempt to re-scale it based on that monitor's settings. This re-scaling
+		// triggers additional display messages to SWT, creating an infinite loop
+		// of positioning and re-scaling events.
+		// Refer: https://github.com/eclipse-platform/eclipse.platform.swt/issues/557
+		Point cursorLocation = display.getCursorLocation();
+		Rectangle monitorBounds = cursorLocation instanceof MonitorAwarePoint monitorAwarePoint
+				? getContainingMonitorBoundsInMultiZoomCoordinateSystem(monitorAwarePoint)
+				: getContainingMonitorBoundsInSingleZoomCoordinateSystem(cursorLocation);
+		if (monitorBounds != null) {
+			Rectangle adjustedTooltipBounds = fitTooltipBoundsIntoMonitor(toolRect, monitorBounds);
+			OS.SetWindowPos (hdr.hwndFrom, 0, adjustedTooltipBounds.x, adjustedTooltipBounds.y, adjustedTooltipBounds.width, adjustedTooltipBounds.height, flags);
+			result = LRESULT.ONE;
+		}
+	} else if (!managedTooltip) {
+		// If managedTooltip is false and the cursor is not over the valid part of the
+		// target cell, Windows may still try to display the default tooltip. Since we
+		// can't prevent it from showing at this point, we set its bounds to zero to
+		// effectively hide it.
+		flags |= OS.SWP_NOMOVE;
+		OS.SetWindowPos (hdr.hwndFrom, 0, 0, 0, 0, 0, flags);
+		result = LRESULT.ONE;
+	}
+	return result;
+}
+
+/**
+ * Adjust the tool tip to fit in a single monitor either by shifting its position or by adjusting it's width.
+ */
+private Rectangle fitTooltipBoundsIntoMonitor(RECT tooltipBounds, Rectangle monitorBounds) {
+	int tooltipWidth = tooltipBounds.right - tooltipBounds.left;
+	int tooltipHeight = tooltipBounds.bottom - tooltipBounds.top;
+	if (tooltipBounds.left < monitorBounds.x) {
+		tooltipBounds.left = monitorBounds.x;
+	}
+	int monitorBoundsRightEnd = monitorBounds.x + monitorBounds.width;
+	if (tooltipBounds.right > monitorBoundsRightEnd) {
+		if (tooltipWidth <= monitorBounds.width) {
+			tooltipBounds.left = monitorBoundsRightEnd - tooltipWidth;
+		} else {
+			tooltipBounds.left = monitorBounds.x;
+		}
+		tooltipWidth = monitorBoundsRightEnd - tooltipBounds.left;
+	}
+	return new Rectangle(tooltipBounds.left, tooltipBounds.top, tooltipWidth, tooltipHeight);
+}
+
+private Rectangle getContainingMonitorBoundsInSingleZoomCoordinateSystem(Point point) {
+	int zoom = getZoom();
+	point = DPIUtil.scaleUp(point, zoom);
+	for (Monitor monitor : display.getMonitors()) {
+		Rectangle monitorBounds = DPIUtil.scaleUp(monitor.getBounds(), zoom);
+		if (monitorBounds.contains(point)) {
+			return monitorBounds;
+		}
+	}
+	return null;
+}
+
+private Rectangle getContainingMonitorBoundsInMultiZoomCoordinateSystem(MonitorAwarePoint point) {
+	Monitor monitor = point.getMonitor();
+	return new Rectangle(monitor.x, monitor.y, DPIUtil.scaleUp(monitor.width, monitor.zoom),
+			DPIUtil.scaleUp(monitor.height, monitor.zoom));
 }
 
 LRESULT wmNotifyToolTip (NMTTCUSTOMDRAW nmcd, long lParam) {
@@ -8214,7 +8284,7 @@ LRESULT wmNotifyToolTip (NMTTCUSTOMDRAW nmcd, long lParam) {
 							data.foreground = OS.GetTextColor (nmcd.hdc);
 							data.background = OS.GetBkColor (nmcd.hdc);
 							data.font = Font.win32_new (display, hFont);
-							GC gc = GC.win32_new (nmcd.hdc, data);
+							GC gc = createNewGC(nmcd.hdc, data);
 							int x = cellRect [0].left + INSET;
 							if (index [0] != 0) x -= gridWidth;
 							Image image = item [0].getImage (index [0]);
@@ -8224,7 +8294,8 @@ LRESULT wmNotifyToolTip (NMTTCUSTOMDRAW nmcd, long lParam) {
 								if (imageList == null) size.x = imageRect.right - imageRect.left;
 								if (image != null) {
 									Rectangle rect = image.getBounds (); // Points
-									gc.drawImage (image, rect.x, rect.y, rect.width, rect.height, DPIUtil.autoScaleDown(x), DPIUtil.autoScaleDown(imageRect.top), DPIUtil.autoScaleDown(size.x), DPIUtil.autoScaleDown(size.y));
+									int zoom = getZoom();
+									gc.drawImage (image, rect.x, rect.y, rect.width, rect.height, DPIUtil.scaleDown(x, zoom), DPIUtil.scaleDown(imageRect.top, zoom), DPIUtil.scaleDown(size.x, zoom), DPIUtil.scaleDown(size.y, zoom));
 									x += INSET + (index [0] == 0 ? 1 : 0);
 								}
 								x += size.x;
@@ -8280,11 +8351,12 @@ private static void handleDPIChange(Widget widget, int newZoom, float scalingFac
 		tree.imageList = null;
 	}
 
-	if (tree.hooks(SWT.MeasureItem)) {
-		// with the measure item hook, the height must be programmatically recalculated
-		var itemHeight = tree.getItemHeightInPixels();
-		tree.setItemHeight(Math.round(itemHeight * scalingFactor));
-	}
+	// if the item height was set at least once programmatically with TVM_SETITEMHEIGHT,
+	// the item height of the tree is not managed by the OS anymore e.g. when the zoom
+	// on the monitor is changed, the height of the item will stay at the fixed size.
+	// Resetting it will re-enable the default behavior again
+	tree.setItemHeight(-1);
+
 	for (TreeColumn treeColumn : tree.getColumns()) {
 		DPIZoomChangeRegistry.applyChange(treeColumn, newZoom, scalingFactor);
 	}
@@ -8292,6 +8364,7 @@ private static void handleDPIChange(Widget widget, int newZoom, float scalingFac
 		DPIZoomChangeRegistry.applyChange(item, newZoom, scalingFactor);
 	}
 
+	tree.calculateAndApplyIndentSize();
 	tree.updateOrientation();
 	tree.setScrollWidth();
 	// Reset of CheckBox Size required (if SWT.Check is not set, this is a no-op)

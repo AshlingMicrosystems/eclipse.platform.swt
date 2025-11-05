@@ -13,14 +13,14 @@
  *******************************************************************************/
 package org.eclipse.swt.tests.junit;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.SWTException;
 import org.eclipse.swt.widgets.MessageBox;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * Automated Test Suite for class org.eclipse.swt.widgets.MessageBox
@@ -31,7 +31,7 @@ public class Test_org_eclipse_swt_widgets_MessageBox extends Test_org_eclipse_sw
 
 
 @Override
-@Before
+@BeforeEach
 public void setUp() {
 	super.setUp();
 	messageBox = new MessageBox(shell, SWT.NULL);
@@ -52,20 +52,13 @@ public void setUp() {
 @Test
 public void test_ConstructorLorg_eclipse_swt_widgets_Shell(){
 	new MessageBox(shell);
-	try {
-		new MessageBox(null);
-		fail("No exception thrown for parent == null");
-	}
-	catch (IllegalArgumentException e) {
-	}
+	assertThrows(IllegalArgumentException.class, () -> new MessageBox(null),
+			"No exception thrown for parent == null");
 }
 
 /**
  * Makes the dialog visible and brings it to the front
  * of the display.
- *
- * @return the ID of the button that was selected to dismiss the
- *         message box (e.g. SWT.OK, SWT.CANCEL, etc...)
  */
 @Test
 public void test_open(){
@@ -86,12 +79,7 @@ public void test_setMessageLjava_lang_String(){
 	assertEquals(messageBox.getMessage(), testStr);
 	messageBox.setMessage("");
 	assertEquals(messageBox.getMessage(), "");
-	try {
-		messageBox.setMessage(null);
-		fail("No exception thrown");
-	}
-	catch (IllegalArgumentException e) {
-	}
+	assertThrows(IllegalArgumentException.class, () -> messageBox.setMessage(null), "No exception thrown");
 }
 
 /* custom */

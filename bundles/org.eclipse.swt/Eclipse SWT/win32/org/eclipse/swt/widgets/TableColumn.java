@@ -309,7 +309,7 @@ public String getToolTipText () {
  */
 public int getWidth () {
 	checkWidget ();
-	return DPIUtil.autoScaleDown(getWidthInPixels());
+	return DPIUtil.scaleDown(getWidthInPixels(), getZoom());
 }
 
 int getWidthInPixels () {
@@ -413,7 +413,7 @@ public void pack () {
 		if (parent.sortColumn == this && parent.sortDirection != SWT.NONE) {
 			headerWidth += Table.SORT_WIDTH;
 		} else if (image != null) {
-			Rectangle bounds = image.getBoundsInPixels ();
+			Rectangle bounds = DPIUtil.scaleUp(image.getBounds(), getZoom());
 			headerWidth += bounds.width;
 		}
 		long hwndHeader = OS.SendMessage (hwnd, OS.LVM_GETHEADER, 0, 0);
@@ -439,8 +439,8 @@ public void pack () {
 				Event event = parent.sendMeasureItemEvent (item, i, index, hDC);
 				if (hFont != -1) hFont = OS.SelectObject (hDC, hFont);
 				if (isDisposed () || parent.isDisposed ()) break;
-				Rectangle bounds = event.getBoundsInPixels();
-				columnWidth = Math.max (columnWidth, bounds.x + bounds.width - headerRect.left);
+				Rectangle bounds = event.getBounds();
+				columnWidth = Math.max (columnWidth, DPIUtil.scaleUp(bounds.x + bounds.width, getZoom()) - headerRect.left);
 			}
 		}
 		if (newFont != 0) OS.SelectObject (hDC, oldFont);
@@ -854,7 +854,7 @@ public void setToolTipText (String string) {
  */
 public void setWidth (int width) {
 	checkWidget ();
-	setWidthInPixels(DPIUtil.autoScaleUp(width));
+	setWidthInPixels(DPIUtil.scaleUp(width, getZoom()));
 }
 
 void setWidthInPixels (int width) {
@@ -891,11 +891,16 @@ private static void handleDPIChange(Widget widget, int newZoom, float scalingFac
 	if (!(widget instanceof TableColumn tableColumn)) {
 		return;
 	}
+	Table table = tableColumn.getParent();
+	boolean ignoreColumnResize = table.ignoreColumnResize;
+	table.ignoreColumnResize = true;
 	final int newColumnWidth = Math.round(tableColumn.getWidthInPixels() * scalingFactor);
 	tableColumn.setWidthInPixels(newColumnWidth);
+	table.ignoreColumnResize = ignoreColumnResize;
+
 	Image image = tableColumn.getImage();
 	if (image != null) {
-		tableColumn.setImage(Image.win32_new(image, newZoom));
+		tableColumn.setImage(image);
 	}
 }
 }

@@ -50,10 +50,6 @@ public class ToolItem extends Item {
 	short cx;
 	int foreground = -1, background = -1;
 
-	static {
-		DPIZoomChangeRegistry.registerHandler(ToolItem::handleDPIChange, ToolItem.class);
-	}
-
 /**
  * Constructs a new instance of this class given its parent
  * (which must be a <code>ToolBar</code>) and a style value
@@ -239,7 +235,7 @@ void destroyWidget () {
  */
 public Rectangle getBounds () {
 	checkWidget();
-	return DPIUtil.autoScaleDown(getBoundsInPixels());
+	return DPIUtil.scaleDown(getBoundsInPixels(), getZoom());
 }
 
 Rectangle getBoundsInPixels () {
@@ -452,7 +448,7 @@ public String getToolTipText () {
  */
 public int getWidth () {
 	checkWidget();
-	return DPIUtil.autoScaleDown(getWidthInPixels());
+	return DPIUtil.scaleDown(getWidthInPixels(), getZoom());
 }
 
 int getWidthInPixels () {
@@ -1080,7 +1076,7 @@ public void setToolTipText (String string) {
  */
 public void setWidth (int width) {
 	checkWidget();
-	setWidthInPixels(DPIUtil.autoScaleUp(width));
+	setWidthInPixels(DPIUtil.scaleUp(width, getZoom()));
 }
 
 void setWidthInPixels (int width) {
@@ -1107,16 +1103,16 @@ void updateImages (boolean enabled) {
 	ImageList hotImageList = parent.getHotImageList ();
 	ImageList disabledImageList = parent.getDisabledImageList();
 	if (info.iImage == OS.I_IMAGENONE) {
-		Rectangle bounds = DPIUtil.autoScaleBounds(image.getBounds(), getParent().getZoom(), 100);
+		Rectangle bounds = DPIUtil.scaleBounds(image.getBounds(), getParent().getZoom(), 100);
 		int listStyle = parent.style & SWT.RIGHT_TO_LEFT;
 		if (imageList == null) {
-			imageList = display.getImageListToolBar (listStyle, bounds.width, bounds.height);
+			imageList = display.getImageListToolBar (listStyle, bounds.width, bounds.height, getZoom());
 		}
 		if (disabledImageList == null) {
-			disabledImageList = display.getImageListToolBarDisabled (listStyle, bounds.width, bounds.height);
+			disabledImageList = display.getImageListToolBarDisabled (listStyle, bounds.width, bounds.height, getZoom());
 		}
 		if (hotImageList == null) {
-			hotImageList = display.getImageListToolBarHot (listStyle, bounds.width, bounds.height);
+			hotImageList = display.getImageListToolBarHot (listStyle, bounds.width, bounds.height, getZoom());
 		}
 		Image disabled = disabledImage;
 		if (disabledImage == null) {
@@ -1217,40 +1213,5 @@ LRESULT wmCommandChild (long wParam, long lParam) {
 	}
 	sendSelectionEvent (SWT.Selection);
 	return null;
-}
-
-private static void handleDPIChange(Widget widget, int newZoom, float scalingFactor) {
-	if (!(widget instanceof ToolItem item)) {
-		return;
-	}
-	Image image = item.getImage();
-	if (image != null) {
-		ToolBar parent = item.getParent();
-		Display display = item.getDisplay();
-		int listStyle = parent.style & SWT.RIGHT_TO_LEFT;
-
-		Rectangle bounds = DPIUtil.autoScaleBounds(image.getBounds(), newZoom, 100);
-		if (parent.getImageList() == null) {
-			parent.setImageList (display.getImageListToolBar (listStyle, bounds.width, bounds.height));
-		}
-		if (parent.getDisabledImageList() == null) {
-			parent.setDisabledImageList (display.getImageListToolBarDisabled (listStyle, bounds.width, bounds.height));
-		}
-		if (parent.getHotImageList() == null) {
-			parent.setHotImageList (display.getImageListToolBarHot (listStyle, bounds.width, bounds.height));
-		}
-		Image.win32_new(image, newZoom);
-
-		Image disabledImage = item.getDisabledImage();
-		if (disabledImage != null && !disabledImage.isDisposed()) {
-			Image.win32_new(disabledImage, newZoom);
-		}
-
-		Image hotImage = item.getHotImage();
-		if (hotImage != null) {
-			Image.win32_new(hotImage, newZoom);
-		}
-	}
-	item.setWidthInPixels(0);
 }
 }

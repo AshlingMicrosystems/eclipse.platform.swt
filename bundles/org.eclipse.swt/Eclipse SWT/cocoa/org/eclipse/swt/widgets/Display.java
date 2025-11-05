@@ -5988,9 +5988,10 @@ static long dialogProc(long id, long sel, long arg0) {
 
 	switch (Selector.valueOf(sel)) {
 		case sel_changeColor_: {
-			ColorDialog dialog = (ColorDialog)OS.JNIGetObject(jniRef[0]);
-			if (dialog == null) return 0;
-			dialog.changeColor(id, sel, arg0);
+			Object object = OS.JNIGetObject(jniRef[0]);
+			if (object instanceof ColorDialog colorDialog) {
+				colorDialog.changeColor(id, sel, arg0);
+			}
 			return 0;
 		}
 		case sel_changeFont_: {
@@ -6012,10 +6013,10 @@ static long dialogProc(long id, long sel, long arg0) {
 		}
 		case sel_windowWillClose_: {
 			Object object = OS.JNIGetObject(jniRef[0]);
-			if (object instanceof FontDialog) {
-				((FontDialog)object).windowWillClose(id, sel, arg0);
-			} else if (object instanceof ColorDialog) {
-				((ColorDialog)object).windowWillClose(id, sel, arg0);
+			if (object instanceof FontDialog fontDialog) {
+				fontDialog.windowWillClose(id, sel, arg0);
+			} else if (object instanceof ColorDialog colorDialog) {
+				colorDialog.windowWillClose(id, sel, arg0);
 			}
 			return 0;
 		}
@@ -6831,5 +6832,39 @@ static long windowProc(long id, long sel, long arg0, long arg1, long arg2, long 
 
 static boolean isActivateShellOnForceFocus() {
 	return "true".equals(System.getProperty("org.eclipse.swt.internal.activateShellOnForceFocus", "true")); //$NON-NLS-1$
+}
+
+/**
+ * {@return whether rescaling of shells at runtime when the DPI scaling of a
+ * shell's monitor changes is activated for this device}
+ * <p>
+ * <b>Note:</b> This functionality is only available on Windows. Calling this
+ * method on other operating system will always return false.
+ *
+ * @since 3.127
+ */
+public boolean isRescalingAtRuntime() {
+	return false;
+}
+
+/**
+ * Activates or deactivates rescaling of shells at runtime whenever the DPI
+ * scaling of the shell's monitor changes. This is only safe to call as long as
+ * no shell has been created for this display. When changing the value after a
+ * shell has been created for this display, the effect is undefined.
+ * <p>
+ * <b>Note:</b> This functionality is only available on Windows. Calling this
+ * method on other operating system will have no effect.
+ *
+ * @param activate whether rescaling shall be activated or deactivated
+ * @return whether activating or deactivating the rescaling was successful
+ * @since 3.127
+ * @deprecated this method should not be used as it needs to be called already
+ *             during instantiation to take proper effect
+ */
+@Deprecated(since = "2025-03", forRemoval = true)
+public boolean setRescalingAtRuntime(boolean activate) {
+	// not implemented for Cocoa
+	return false;
 }
 }

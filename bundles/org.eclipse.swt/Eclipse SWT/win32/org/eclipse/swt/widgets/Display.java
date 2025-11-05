@@ -25,6 +25,7 @@ import org.eclipse.swt.graphics.*;
 import org.eclipse.swt.internal.*;
 import org.eclipse.swt.internal.ole.win32.*;
 import org.eclipse.swt.internal.win32.*;
+import org.eclipse.swt.internal.win32.version.*;
 
 /**
  * Instances of this class are responsible for managing the
@@ -138,6 +139,8 @@ public class Display extends Device implements Executor {
 	EventTable eventTable, filterTable;
 	boolean useOwnDC;
 	boolean externalEventLoop; // events are dispatched outside SWT, e.g. TrackPopupMenu or DoDragDrop
+	private CoordinateSystemMapper coordinateSystemMapper;
+	private boolean rescalingAtRuntime;
 
 	/* Widget Table */
 	private Map<Long, Control> controlByHandle;
@@ -152,7 +155,7 @@ public class Display extends Device implements Executor {
 	}
 
 	/* XP Themes */
-	long hButtonTheme, hButtonThemeDark, hEditTheme, hExplorerBarTheme, hScrollBarTheme, hScrollBarThemeDark, hTabTheme;
+	private Map<Integer, ThemeData> themeDataMap = new HashMap<>();
 	static final char [] EXPLORER = new char [] {'E', 'X', 'P', 'L', 'O', 'R', 'E', 'R', 0};
 	static final char [] TREEVIEW = new char [] {'T', 'R', 'E', 'E', 'V', 'I', 'E', 'W', 0};
 	/* Emergency switch to be used in case of regressions. Not supposed to be changed when app is running. */
@@ -269,10 +272,21 @@ public class Display extends Device implements Executor {
 	 */
 	static final String USE_DARKTHEME_TEXT_ICONS = "org.eclipse.swt.internal.win32.Text.useDarkThemeIcons"; //$NON-NLS-1$
 	boolean textUseDarkthemeIcons = false;
+	/**
+	 * Use dark prefered color scheme in Edge browser.
+	 * Note:<br>
+	 * <ul>
+	 *   <li>When setting this property on the display, it is first AND'ed with !disableCustomThemeTweaks.
+	 *   <li>The data is then read from withing Edge.
+	 *   <li>This is to avoid adding public methods/members.
+	 * </ul>
+	 * Expects a <code>boolean</code> value.
+	 */
+	static final String EDGE_USE_DARK_PREFERED_COLOR_SCHEME = "org.eclipse.swt.internal.win32.Edge.useDarkPreferedColorScheme"; //$NON-NLS-1$
 
 	/* Custom icons */
-	long hIconSearch;
-	long hIconCancel;
+	private HashMap<Integer, Long> sizeToSearchIconHandle = new HashMap<>();
+	private HashMap<Integer, Long> sizeToCancelIconHandle = new HashMap<>();
 
 	/* Focus */
 	int focusEvent;
@@ -517,6 +531,11 @@ public class Display extends Device implements Executor {
 	static int SWT_RESTORECARET;
 	static int DI_GETDRAGIMAGE;
 	static int SWT_OPENDOC;
+	private static int ICON_SIZE_AT_100 = retrieveDefaultIconSize();
+
+	private static int retrieveDefaultIconSize() {
+		return OS.GetSystemMetricsForDpi(OS.SM_CXICON, DPIUtil.mapZoomToDPI(100));
+	}
 
 	/* Skinning support */
 	Widget [] skinList = new Widget [GROW_SIZE];
@@ -869,7 +888,9 @@ static void checkDisplay (Thread thread, boolean multiple) {
 		for (Display display : Displays) {
 			if (display != null) {
 				if (!multiple) SWT.error (SWT.ERROR_NOT_IMPLEMENTED, null, " [multiple displays]"); //$NON-NLS-1$
-				if (display.thread == thread) SWT.error (SWT.ERROR_THREAD_INVALID_ACCESS);
+				if (display.thread == thread)
+					SWT.error(SWT.ERROR_THREAD_INVALID_ACCESS, null,
+							" Another Display is already associated by this thread: " + thread);
 			}
 		}
 	}
@@ -933,6 +954,10 @@ public void close () {
 protected void create (DeviceData data) {
 	checkSubclass ();
 	checkDisplay (thread = Thread.currentThread (), true);
+	if (DPIUtil.isMonitorSpecificScalingActive()) {
+		setMonitorSpecificScaling(true);
+		DPIUtil.setAutoScaleForMonitorSpecificScaling();
+	}
 	createDisplay (data);
 	register (this);
 	if (Default == null) Default = this;
@@ -941,20 +966,21 @@ protected void create (DeviceData data) {
 void createDisplay (DeviceData data) {
 }
 
-static long create32bitDIB (Image image) {
+static long create32bitDIB (Image image, int zoom) {
+	long handle = Image.win32_getHandle(image, zoom);
 	int transparentPixel = -1, alpha = -1;
 	long hMask = 0, hBitmap = 0;
 	byte[] alphaData = null;
 	switch (image.type) {
 		case SWT.ICON:
 			ICONINFO info = new ICONINFO ();
-			OS.GetIconInfo (image.handle, info);
+			OS.GetIconInfo (handle, info);
 			hBitmap = info.hbmColor;
 			hMask = info.hbmMask;
 			break;
 		case SWT.BITMAP:
-			ImageData data = image.getImageData (DPIUtil.getDeviceZoom ());
-			hBitmap = image.handle;
+			ImageData data = image.getImageData (zoom);
+			hBitmap = handle;
 			alpha = data.alpha;
 			alphaData = data.alphaData;
 			transparentPixel = data.transparentPixel;
@@ -1052,7 +1078,7 @@ static long create32bitDIB (Image image) {
 	OS.DeleteObject (srcHdc);
 	OS.DeleteObject (memHdc);
 	OS.ReleaseDC (0, hDC);
-	if (hBitmap != image.handle && hBitmap != 0) OS.DeleteObject (hBitmap);
+	if (hBitmap != handle && hBitmap != 0) OS.DeleteObject (hBitmap);
 	if (hMask != 0) OS.DeleteObject (hMask);
 	return memDib;
 }
@@ -1158,9 +1184,9 @@ static long create32bitDIB (long hBitmap, int alpha, byte [] alphaData, int tran
 	return memDib;
 }
 
-static Image createIcon (Image image) {
+static Image createIcon (Image image, int zoom) {
 	Device device = image.getDevice ();
-	ImageData data = image.getImageDataAtCurrentZoom();
+	ImageData data = image.getImageData(zoom);
 	if (data.alpha == -1 && data.alphaData == null) {
 		ImageData mask = data.getTransparencyMask ();
 		return new Image (device, data, mask);
@@ -1169,7 +1195,7 @@ static Image createIcon (Image image) {
 	long hMask, hBitmap;
 	long hDC = device.internal_new_GC (null);
 	long dstHdc = OS.CreateCompatibleDC (hDC), oldDstBitmap;
-	hBitmap = Display.create32bitDIB (image.handle, data.alpha, data.alphaData, data.transparentPixel);
+	hBitmap = Display.create32bitDIB (Image.win32_getHandle(image, zoom), data.alpha, data.alphaData, data.transparentPixel);
 	hMask = OS.CreateBitmap (width, height, 1, 1, null);
 	oldDstBitmap = OS.SelectObject (dstHdc, hMask);
 	OS.PatBlt (dstHdc, 0, 0, width, height, OS.BLACKNESS);
@@ -1184,7 +1210,27 @@ static Image createIcon (Image image) {
 	if (hIcon == 0) SWT.error(SWT.ERROR_NO_HANDLES);
 	OS.DeleteObject (hBitmap);
 	OS.DeleteObject (hMask);
-	return Image.win32_new (device, SWT.ICON, hIcon);
+	return Image.win32_new (device, SWT.ICON, hIcon, zoom);
+}
+
+long getTextSearchIcon(int size) {
+	if (!sizeToSearchIconHandle.containsKey(size)) {
+		int searchIconResource = textUseDarkthemeIcons ? Text.IDI_SEARCH_DARKTHEME : Text.IDI_SEARCH;
+	    long iconHandle = OS.LoadImage (OS.GetLibraryHandle (), searchIconResource, OS.IMAGE_ICON, size, size, 0);
+	    if (iconHandle == 0) error(SWT.ERROR_NO_HANDLES);
+	    sizeToSearchIconHandle.put(size, iconHandle);
+	}
+    return sizeToSearchIconHandle.get(size);
+}
+
+long getTextCancelIcon(int size) {
+	if (!sizeToCancelIconHandle.containsKey(size)) {
+		int searchIconResource = textUseDarkthemeIcons ? Text.IDI_CANCEL_DARKTHEME : Text.IDI_CANCEL;
+	    long iconHandle = OS.LoadImage (OS.GetLibraryHandle (), searchIconResource, OS.IMAGE_ICON, size, size, 0);
+	    if (iconHandle == 0) error(SWT.ERROR_NO_HANDLES);
+	    sizeToCancelIconHandle.put(size, iconHandle);
+	}
+    return sizeToCancelIconHandle.get(size);
 }
 
 static void deregister (Display display) {
@@ -1415,7 +1461,7 @@ public Widget findWidget (Widget widget, long id) {
 
 long foregroundIdleProc (long code, long wParam, long lParam) {
 	if (code >= 0) {
-		if (!synchronizer.isMessagesEmpty()) {
+		Runnable processMessages = () -> {
 			sendPostExternalEventDispatchEvent ();
 			if (runMessagesInIdle) {
 				if (runMessagesInMessageProc) {
@@ -1441,6 +1487,15 @@ long foregroundIdleProc (long code, long wParam, long lParam) {
 			int flags = OS.PM_NOREMOVE | OS.PM_NOYIELD | OS.PM_QS_INPUT;
 			if (!OS.PeekMessage (msg, 0, 0, 0, flags)) wakeThread ();
 			sendPreExternalEventDispatchEvent ();
+		};
+		if (!synchronizer.isMessagesEmpty()) {
+			// Windows hooks will inherit the thread DPI awareness from
+			// the process. Whatever DPI awareness was set before on
+			// the thread will be overwritten before the hook is called.
+			// This requires to reset the thread DPi awareness to make
+			// sure, all UI updates caused by this will be executed
+			// with the correct DPI awareness
+			runWithProperDPIAwareness(processMessages);
 		}
 	}
 	return OS.CallNextHookEx (idleHook, (int)code, wParam, lParam);
@@ -1666,7 +1721,7 @@ public Control getCursorControl () {
  */
 public Point getCursorLocation () {
 	checkDevice ();
-	return DPIUtil.autoScaleDown(getCursorLocationInPixels());
+	return coordinateSystemMapper.getCursorLocation();
 }
 
 Point getCursorLocationInPixels () {
@@ -1960,7 +2015,7 @@ public Point [] getIconSizes () {
 	};
 }
 
-ImageList getImageList (int style, int width, int height) {
+ImageList getImageList (int style, int width, int height, int zoom) {
 	if (imageList == null) imageList = new ImageList [4];
 
 	int i = 0;
@@ -1984,13 +2039,13 @@ ImageList getImageList (int style, int width, int height) {
 		imageList = newList;
 	}
 
-	ImageList list = new ImageList (style, width, height);
+	ImageList list = new ImageList (style, width, height, zoom);
 	imageList [i] = list;
 	list.addRef();
 	return list;
 }
 
-ImageList getImageListToolBar (int style, int width, int height) {
+ImageList getImageListToolBar (int style, int width, int height, int zoom) {
 	if (toolImageList == null) toolImageList = new ImageList [4];
 
 	int i = 0;
@@ -2014,13 +2069,13 @@ ImageList getImageListToolBar (int style, int width, int height) {
 		toolImageList = newList;
 	}
 
-	ImageList list = new ImageList (style, width, height);
+	ImageList list = new ImageList (style, width, height, zoom);
 	toolImageList [i] = list;
 	list.addRef();
 	return list;
 }
 
-ImageList getImageListToolBarDisabled (int style, int width, int height) {
+ImageList getImageListToolBarDisabled (int style, int width, int height, int zoom) {
 	if (toolDisabledImageList == null) toolDisabledImageList = new ImageList [4];
 
 	int i = 0;
@@ -2044,13 +2099,13 @@ ImageList getImageListToolBarDisabled (int style, int width, int height) {
 		toolDisabledImageList = newList;
 	}
 
-	ImageList list = new ImageList (style, width, height);
+	ImageList list = new ImageList (style, width, height, zoom);
 	toolDisabledImageList [i] = list;
 	list.addRef();
 	return list;
 }
 
-ImageList getImageListToolBarHot (int style, int width, int height) {
+ImageList getImageListToolBarHot (int style, int width, int height, int zoom) {
 	if (toolHotImageList == null) toolHotImageList = new ImageList [4];
 
 	int i = 0;
@@ -2074,7 +2129,7 @@ ImageList getImageListToolBarHot (int style, int width, int height) {
 		toolHotImageList = newList;
 	}
 
-	ImageList list = new ImageList (style, width, height);
+	ImageList list = new ImageList (style, width, height, zoom);
 	toolHotImageList [i] = list;
 	list.addRef();
 	return list;
@@ -2104,7 +2159,7 @@ public static boolean isSystemDarkTheme () {
 	/*
 	 * The registry settings, and Dark Theme itself, is present since Win10 1809
 	 */
-	if (OS.WIN32_BUILD >= OS.WIN32_BUILD_WIN10_1809) {
+	if (OsVersion.IS_WIN10_1809) {
 		int[] result = OS.readRegistryDwords(OS.HKEY_CURRENT_USER,
 				"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", "AppsUseLightTheme");
 		if (result!=null) {
@@ -2145,14 +2200,16 @@ Monitor getMonitor (long hmonitor) {
 	OS.GetMonitorInfo (hmonitor, lpmi);
 	Monitor monitor = new Monitor ();
 	monitor.handle = hmonitor;
-	Rectangle boundsInPixels = new Rectangle (lpmi.rcMonitor_left, lpmi.rcMonitor_top, lpmi.rcMonitor_right - lpmi.rcMonitor_left,lpmi.rcMonitor_bottom - lpmi.rcMonitor_top);
-	monitor.setBounds (DPIUtil.autoScaleDown (boundsInPixels));
-	Rectangle clientAreaInPixels = new Rectangle (lpmi.rcWork_left, lpmi.rcWork_top, lpmi.rcWork_right - lpmi.rcWork_left, lpmi.rcWork_bottom - lpmi.rcWork_top);
-	monitor.setClientArea (DPIUtil.autoScaleDown (clientAreaInPixels));
+	Rectangle boundsInPixels = new Rectangle(lpmi.rcMonitor_left, lpmi.rcMonitor_top, lpmi.rcMonitor_right - lpmi.rcMonitor_left,lpmi.rcMonitor_bottom - lpmi.rcMonitor_top);
+	Rectangle clientAreaInPixels = new Rectangle(lpmi.rcWork_left, lpmi.rcWork_top, lpmi.rcWork_right - lpmi.rcWork_left, lpmi.rcWork_bottom - lpmi.rcWork_top);
 	int [] dpiX = new int[1];
 	int [] dpiY = new int[1];
 	int result = OS.GetDpiForMonitor (monitor.handle, OS.MDT_EFFECTIVE_DPI, dpiX, dpiY);
 	result = (result == OS.S_OK) ? DPIUtil.mapDPIToZoom (dpiX[0]) : 100;
+
+	int autoscaleZoom = DPIUtil.getZoomForAutoscaleProperty(result);
+	monitor.setBounds(coordinateSystemMapper.mapMonitorBounds(boundsInPixels, autoscaleZoom));
+	monitor.setClientArea(coordinateSystemMapper.mapMonitorBounds(clientAreaInPixels, autoscaleZoom));
 	if (result == 0) {
 		System.err.println("***WARNING: GetDpiForMonitor: SWT could not get valid monitor scaling factor.");
 		result = 100;
@@ -2504,27 +2561,39 @@ public Image getSystemImage (int id) {
 	switch (id) {
 		case SWT.ICON_ERROR: {
 			if (errorImage != null) return errorImage;
-			long hIcon = OS.LoadImage (0, OS.OIC_HAND, OS.IMAGE_ICON, 0, 0, OS.LR_SHARED);
-			return errorImage = Image.win32_new (this, SWT.ICON, hIcon);
+			errorImage = new Image(this, getImageDataProviderForIcon(OS.OIC_HAND));
+			return errorImage;
 		}
 		case SWT.ICON_WORKING:
 		case SWT.ICON_INFORMATION: {
 			if (infoImage != null) return infoImage;
-			long hIcon = OS.LoadImage (0, OS.OIC_INFORMATION, OS.IMAGE_ICON, 0, 0, OS.LR_SHARED);
-			return infoImage = Image.win32_new (this, SWT.ICON, hIcon);
+			infoImage = new Image(this, getImageDataProviderForIcon(OS.OIC_INFORMATION));
+			return infoImage;
 		}
 		case SWT.ICON_QUESTION: {
 			if (questionImage != null) return questionImage;
-			long hIcon = OS.LoadImage (0, OS.OIC_QUES, OS.IMAGE_ICON, 0, 0, OS.LR_SHARED);
-			return questionImage = Image.win32_new (this, SWT.ICON, hIcon);
+			questionImage = new Image(this, getImageDataProviderForIcon(OS.OIC_QUES));
+			return questionImage;
 		}
 		case SWT.ICON_WARNING: {
 			if (warningIcon != null) return warningIcon;
-			long hIcon = OS.LoadImage (0, OS.OIC_BANG, OS.IMAGE_ICON, 0, 0, OS.LR_SHARED);
-			return warningIcon = Image.win32_new (this, SWT.ICON, hIcon);
+			warningIcon = new Image(this, getImageDataProviderForIcon(OS.OIC_BANG));
+			return warningIcon;
 		}
 	}
 	return null;
+}
+
+private ImageDataProvider getImageDataProviderForIcon(int iconName) {
+	return zoom -> {
+		int scaledIconSize = DPIUtil.scaleUp(ICON_SIZE_AT_100, zoom);
+		long [] hIcon = new long [1];
+		OS.LoadIconWithScaleDown(0, iconName, scaledIconSize, scaledIconSize, hIcon);
+		Image image = Image.win32_new (this, SWT.ICON, hIcon[0], zoom);
+		ImageData imageData = image.getImageData(zoom);
+		image.dispose();
+		return imageData;
+	};
 }
 
 /**
@@ -2625,93 +2694,55 @@ public boolean getTouchEnabled () {
 	return (value & (OS.NID_READY | OS.NID_MULTI_INPUT)) == (OS.NID_READY | OS.NID_MULTI_INPUT);
 }
 
-long hButtonTheme () {
-	if (hButtonTheme != 0) return hButtonTheme;
-	final char[] themeName = "BUTTON\0".toCharArray();
-	return hButtonTheme = OS.OpenThemeData (hwndMessage, themeName);
+long hButtonTheme (int dpi) {
+	return getOrCreateThemeData(dpi).hButtonTheme();
 }
 
-long hButtonThemeDark () {
-	if (hButtonThemeDark != 0) return hButtonThemeDark;
-	final char[] themeName = "Darkmode_Explorer::BUTTON\0".toCharArray();
-	return hButtonThemeDark = OS.OpenThemeData (hwndMessage, themeName);
+long hButtonThemeDark (int dpi) {
+	return getOrCreateThemeData(dpi).hButtonThemeDark();
 }
 
-long hButtonThemeAuto () {
+long hButtonThemeAuto (int dpi) {
 	if (useDarkModeExplorerTheme) {
-		return hButtonThemeDark ();
+		return hButtonThemeDark (dpi);
 	} else {
-		return hButtonTheme ();
+		return hButtonTheme (dpi);
 	}
 }
 
-long hEditTheme () {
-	if (hEditTheme != 0) return hEditTheme;
-	final char[] themeName = "EDIT\0".toCharArray();
-	return hEditTheme = OS.OpenThemeData (hwndMessage, themeName);
+long hEditTheme (int dpi) {
+	return getOrCreateThemeData(dpi).hEditTheme();
 }
 
-long hExplorerBarTheme () {
-	if (hExplorerBarTheme != 0) return hExplorerBarTheme;
-	final char[] themeName = "EXPLORERBAR\0".toCharArray();
-	return hExplorerBarTheme = OS.OpenThemeData (hwndMessage, themeName);
+long hExplorerBarTheme (int dpi) {
+	return getOrCreateThemeData(dpi).hExplorerBarTheme();
 }
 
-long hScrollBarTheme () {
-	if (hScrollBarTheme != 0) return hScrollBarTheme;
-	final char[] themeName = "SCROLLBAR\0".toCharArray();
-	return hScrollBarTheme = OS.OpenThemeData (hwndMessage, themeName);
+long hScrollBarTheme (int dpi) {
+	return getOrCreateThemeData(dpi).hScrollBarTheme();
 }
 
-long hScrollBarThemeDark () {
-	if (hScrollBarThemeDark != 0) return hScrollBarThemeDark;
-	final char[] themeName = "Darkmode_Explorer::SCROLLBAR\0".toCharArray();
-	return hScrollBarThemeDark = OS.OpenThemeData (hwndMessage, themeName);
+long hScrollBarThemeDark (int dpi) {
+	return getOrCreateThemeData(dpi).hScrollBarThemeDark();
 }
 
-long hScrollBarThemeAuto () {
+long hScrollBarThemeAuto (int dpi) {
 	if (useDarkModeExplorerTheme) {
-		return hScrollBarThemeDark ();
+		return hScrollBarThemeDark (dpi);
 	} else {
-		return hScrollBarTheme ();
+		return hScrollBarTheme (dpi);
 	}
 }
 
-long hTabTheme () {
-	if (hTabTheme != 0) return hTabTheme;
-	final char[] themeName = "TAB\0".toCharArray();
-	return hTabTheme = OS.OpenThemeData (hwndMessage, themeName);
+long hTabTheme (int dpi) {
+	return getOrCreateThemeData(dpi).hTabTheme();
 }
 
 void resetThemes() {
-	if (hButtonTheme != 0) {
-		OS.CloseThemeData (hButtonTheme);
-		hButtonTheme = 0;
+	for (ThemeData themeData : themeDataMap.values()) {
+		themeData.reset();
 	}
-	if (hButtonThemeDark != 0) {
-		OS.CloseThemeData (hButtonThemeDark);
-		hButtonThemeDark = 0;
-	}
-	if (hEditTheme != 0) {
-		OS.CloseThemeData (hEditTheme);
-		hEditTheme = 0;
-	}
-	if (hExplorerBarTheme != 0) {
-		OS.CloseThemeData (hExplorerBarTheme);
-		hExplorerBarTheme = 0;
-	}
-	if (hScrollBarTheme != 0) {
-		OS.CloseThemeData (hScrollBarTheme);
-		hScrollBarTheme = 0;
-	}
-	if (hScrollBarThemeDark != 0) {
-		OS.CloseThemeData (hScrollBarThemeDark);
-		hScrollBarThemeDark = 0;
-	}
-	if (hTabTheme != 0) {
-		OS.CloseThemeData (hTabTheme);
-		hTabTheme = 0;
-	}
+	themeDataMap.clear();
 }
 
 /**
@@ -2748,6 +2779,7 @@ public long internal_new_GC (GCData data) {
 		} else {
 			data.style |= SWT.LEFT_TO_RIGHT;
 		}
+		data.nativeZoom = getPrimaryMonitor().getZoom();
 		data.device = this;
 		data.font = getSystemFont ();
 	}
@@ -2768,6 +2800,9 @@ protected void init () {
 	// Field initialization happens after super constructor
 	controlByHandle = new HashMap<>();
 	this.synchronizer = new Synchronizer (this);
+	if (this.coordinateSystemMapper == null) {
+		this.coordinateSystemMapper = new SingleZoomCoordinateSystemMapper(this);
+	}
 	super.init ();
 	DPIUtil.setDeviceZoom (getDeviceZoom ());
 
@@ -2943,8 +2978,7 @@ boolean isValidThread () {
 public Point map (Control from, Control to, Point point) {
 	checkDevice ();
 	if (point == null) error (SWT.ERROR_NULL_ARGUMENT);
-	point = DPIUtil.autoScaleUp(point);
-	return DPIUtil.autoScaleDown(mapInPixels(from, to, point));
+	return coordinateSystemMapper.map(from, to, point);
 }
 
 Point mapInPixels (Control from, Control to, Point point) {
@@ -2989,9 +3023,7 @@ Point mapInPixels (Control from, Control to, Point point) {
  */
 public Point map (Control from, Control to, int x, int y) {
 	checkDevice ();
-	x = DPIUtil.autoScaleUp(x);
-	y = DPIUtil.autoScaleUp(y);
-	return DPIUtil.autoScaleDown(mapInPixels(from, to, x, y));
+	return coordinateSystemMapper.map(from, to, x, y);
 }
 
 Point mapInPixels (Control from, Control to, int x, int y) {
@@ -3046,8 +3078,7 @@ Point mapInPixels (Control from, Control to, int x, int y) {
 public Rectangle map (Control from, Control to, Rectangle rectangle) {
 	checkDevice ();
 	if (rectangle == null) error (SWT.ERROR_NULL_ARGUMENT);
-	rectangle = DPIUtil.autoScaleUp(rectangle);
-	return DPIUtil.autoScaleDown(mapInPixels(from, to, rectangle));
+	return coordinateSystemMapper.map(from, to, rectangle);
 }
 
 Rectangle mapInPixels (Control from, Control to, Rectangle rectangle) {
@@ -3094,11 +3125,7 @@ Rectangle mapInPixels (Control from, Control to, Rectangle rectangle) {
  */
 public Rectangle map (Control from, Control to, int x, int y, int width, int height) {
 	checkDevice ();
-	x = DPIUtil.autoScaleUp(x);
-	y = DPIUtil.autoScaleUp(y);
-	width = DPIUtil.autoScaleUp(width);
-	height = DPIUtil.autoScaleUp(height);
-	return DPIUtil.autoScaleDown(mapInPixels(from, to, x, y, width, height));
+	return coordinateSystemMapper.map(from, to, x, y, width, height);
 }
 
 Rectangle mapInPixels (Control from, Control to, int x, int y, int width, int height) {
@@ -3114,6 +3141,22 @@ Rectangle mapInPixels (Control from, Control to, int x, int y, int width, int he
 	rect.bottom = y + height;
 	OS.MapWindowPoints (hwndFrom, hwndTo, rect, 2);
 	return new Rectangle (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+}
+
+Point translateFromDisplayCoordinates(Point point, int zoom) {
+	return coordinateSystemMapper.translateFromDisplayCoordinates(point, zoom);
+}
+
+Point translateToDisplayCoordinates(Point point, int zoom) {
+	return coordinateSystemMapper.translateToDisplayCoordinates(point, zoom);
+}
+
+Rectangle translateFromDisplayCoordinates(Rectangle rect, int zoom) {
+	return coordinateSystemMapper.translateFromDisplayCoordinates(rect, zoom);
+}
+
+Rectangle translateToDisplayCoordinates(Rectangle rect, int zoom) {
+	return coordinateSystemMapper.translateToDisplayCoordinates(rect, zoom);
 }
 
 long messageProc (long hwnd, long msg, long wParam, long lParam) {
@@ -3407,9 +3450,17 @@ long msgFilterProc (long code, long wParam, long lParam) {
 			if (hookMsg.message == OS.WM_NULL) {
 				MSG msg = new MSG ();
 				int flags = OS.PM_NOREMOVE | OS.PM_NOYIELD | OS.PM_QS_INPUT | OS.PM_QS_POSTMESSAGE;
-				if (!OS.PeekMessage (msg, 0, 0, 0, flags)) {
-					if (runAsyncMessages (false)) wakeThread ();
-				}
+				// Windows hooks will inherit the thread DPI awareness from
+				// the process. Whatever DPI awareness was set before on
+				// the thread will be overwritten before the hook is called.
+				// This requires to reset the thread DPi awareness to make
+				// sure, all UI updates caused by this will be executed
+				// with the correct DPI awareness
+				runWithProperDPIAwareness(() -> {
+					if (!OS.PeekMessage (msg, 0, 0, 0, flags)) {
+						if (runAsyncMessages (false)) wakeThread ();
+					}
+				});
 			}
 			break;
 		}
@@ -3566,7 +3617,7 @@ public boolean post (Event event) {
 					int y = OS.GetSystemMetrics (OS.SM_YVIRTUALSCREEN);
 					int width = OS.GetSystemMetrics (OS.SM_CXVIRTUALSCREEN);
 					int height = OS.GetSystemMetrics (OS.SM_CYVIRTUALSCREEN);
-					Point loc = event.getLocationInPixels();
+					Point loc = DPIUtil.scaleUp(event.getLocation(), getDeviceZoom());
 					inputs.dx = ((loc.x - x) * 65535 + width - 2) / (width - 1);
 					inputs.dy = ((loc.y - y) * 65535 + height - 2) / (height - 1);
 				} else {
@@ -3780,8 +3831,10 @@ void releaseDisplay () {
 	}
 
 	/* Free custom icons */
-	if (hIconSearch != 0) OS.DestroyIcon (hIconSearch);
-	if (hIconCancel != 0) OS.DestroyIcon (hIconCancel);
+	sizeToSearchIconHandle.values().forEach(handle -> OS.DestroyIcon(handle));
+	sizeToCancelIconHandle.values().forEach(handle -> OS.DestroyIcon(handle));
+	sizeToSearchIconHandle.clear();
+	sizeToCancelIconHandle.clear();
 
 	/* Release XP Themes */
 	resetThemes();
@@ -4339,7 +4392,7 @@ public void sendPostExternalEventDispatchEvent () {
  */
 public void setCursorLocation (int x, int y) {
 	checkDevice ();
-	setCursorLocationInPixels (DPIUtil.autoScaleUp (x), DPIUtil.autoScaleUp (y));
+	coordinateSystemMapper.setCursorLocation(x, y);
 }
 
 void setCursorLocationInPixels (int x, int y) {
@@ -4501,6 +4554,9 @@ public void setData (String key, Object value) {
 			break;
 		case USE_DARKTHEME_TEXT_ICONS:
 			textUseDarkthemeIcons = !disableCustomThemeTweaks && _toBoolean(value);
+			break;
+		case EDGE_USE_DARK_PREFERED_COLOR_SCHEME:
+			value = !disableCustomThemeTweaks && _toBoolean(value);
 			break;
 	}
 
@@ -5123,47 +5179,27 @@ String wrapText (String text, long handle, int width) {
 }
 
 static String withCrLf (String string) {
-
-	/* If the string is empty, return the string. */
-	int length = string.length ();
-	if (length == 0) return string;
-
-	/*
-	* Check for an LF or CR/LF and assume the rest of
-	* the string is formated that way.  This will not
-	* work if the string contains mixed delimiters.
-	*/
-	int i = string.indexOf ('\n', 0);
-	if (i == -1) return string;
-	if (i > 0 && string.charAt (i - 1) == '\r') {
-		return string;
-	}
-
-	/*
-	* The string is formatted with LF.  Compute the
-	* number of lines and the size of the buffer
-	* needed to hold the result
-	*/
-	i++;
-	int count = 1;
-	while (i < length) {
-		if ((i = string.indexOf ('\n', i)) == -1) break;
-		count++; i++;
-	}
-	count += length;
-
 	/* Create a new string with the CR/LF line terminator. */
-	i = 0;
-	StringBuilder result = new StringBuilder (count);
+	int i = 0;
+	int length = string.length();
+	StringBuilder result = new StringBuilder (length);
 	while (i < length) {
 		int j = string.indexOf ('\n', i);
-		if (j == -1) j = length;
-		result.append (string.substring (i, j));
-		if ((i = j) < length) {
-			result.append ("\r\n"); //$NON-NLS-1$
-			i++;
+		if (j > 0 && string.charAt(j - 1) == '\r') {
+			result.append(string.substring(i, j + 1));
+			i = j + 1;
+		} else {
+			if (j == -1) j = length;
+			result.append (string.substring (i, j));
+			if ((i = j) < length) {
+				result.append ("\r\n"); //$NON-NLS-1$
+				i++;
+			}
 		}
 	}
+
+	/* Avoid creating a copy of the string if it has not changed */
+	if (string.length()== result.length()) return string;
 	return result.toString ();
 }
 
@@ -5206,5 +5242,190 @@ static char [] withCrLf (char [] string) {
 
 static boolean isActivateShellOnForceFocus() {
 	return "true".equals(System.getProperty("org.eclipse.swt.internal.activateShellOnForceFocus", "true")); //$NON-NLS-1$
+}
+
+private ThemeData getOrCreateThemeData(int dpi) {
+	if (themeDataMap.containsKey(dpi)) {
+		return themeDataMap.get(dpi);
+	}
+	ThemeData themeData = new ThemeData(dpi);
+	themeDataMap.put(dpi, themeData);
+	return themeData;
+}
+
+private class ThemeData {
+	private long hButtonTheme;
+	private long hButtonThemeDark;
+	private long hEditTheme;
+	private long hExplorerBarTheme;
+	private long hScrollBarTheme;
+	private long hScrollBarThemeDark;
+	private long hTabTheme;
+
+	private int dpi;
+
+	private ThemeData(int dpi) {
+		this.dpi = dpi;
+	}
+
+	long hButtonTheme () {
+		if (hButtonTheme != 0) return hButtonTheme;
+		final char[] themeName = "BUTTON\0".toCharArray();
+		return hButtonTheme = openThemeData(themeName);
+	}
+
+	long hButtonThemeDark () {
+		if (hButtonThemeDark != 0) return hButtonThemeDark;
+		final char[] themeName = "Darkmode_Explorer::BUTTON\0".toCharArray();
+		return hButtonThemeDark = openThemeData(themeName);
+	}
+
+	long hEditTheme () {
+		if (hEditTheme != 0) return hEditTheme;
+		final char[] themeName = "EDIT\0".toCharArray();
+		return hEditTheme = openThemeData(themeName);
+	}
+
+	long hExplorerBarTheme () {
+		if (hExplorerBarTheme != 0) return hExplorerBarTheme;
+		final char[] themeName = "EXPLORERBAR\0".toCharArray();
+		return hExplorerBarTheme = openThemeData(themeName);
+	}
+
+	long hScrollBarTheme () {
+		if (hScrollBarTheme != 0) return hScrollBarTheme;
+		final char[] themeName = "SCROLLBAR\0".toCharArray();
+		return hScrollBarTheme = openThemeData(themeName);
+	}
+
+	long hScrollBarThemeDark () {
+		if (hScrollBarThemeDark != 0) return hScrollBarThemeDark;
+		final char[] themeName = "Darkmode_Explorer::SCROLLBAR\0".toCharArray();
+		return hScrollBarThemeDark = openThemeData(themeName);
+	}
+
+	long hTabTheme () {
+		if (hTabTheme != 0) return hTabTheme;
+		final char[] themeName = "TAB\0".toCharArray();
+		return hTabTheme = openThemeData(themeName);
+	}
+
+
+	public void reset() {
+		if (hButtonTheme != 0) {
+			OS.CloseThemeData (hButtonTheme);
+			hButtonTheme = 0;
+		}
+		if (hButtonThemeDark != 0) {
+			OS.CloseThemeData (hButtonThemeDark);
+			hButtonThemeDark = 0;
+		}
+		if (hEditTheme != 0) {
+			OS.CloseThemeData (hEditTheme);
+			hEditTheme = 0;
+		}
+		if (hExplorerBarTheme != 0) {
+			OS.CloseThemeData (hExplorerBarTheme);
+			hExplorerBarTheme = 0;
+		}
+		if (hScrollBarTheme != 0) {
+			OS.CloseThemeData (hScrollBarTheme);
+			hScrollBarTheme = 0;
+		}
+		if (hScrollBarThemeDark != 0) {
+			OS.CloseThemeData (hScrollBarThemeDark);
+			hScrollBarThemeDark = 0;
+		}
+		if (hTabTheme != 0) {
+			OS.CloseThemeData (hTabTheme);
+			hTabTheme = 0;
+		}
+	}
+
+	private long openThemeData(final char[] themeName) {
+		return OS.OpenThemeData(hwndMessage, themeName, dpi);
+	}
+}
+
+/**
+ * {@return whether rescaling of shells at runtime when the DPI scaling of a
+ * shell's monitor changes is activated for this device}
+ * <p>
+ * <b>Note:</b> This functionality is only available on Windows. Calling this
+ * method on other operating system will always return false.
+ *
+ * @since 3.127
+ */
+public boolean isRescalingAtRuntime() {
+	return rescalingAtRuntime;
+}
+
+/**
+ * Activates or deactivates rescaling of shells at runtime whenever the DPI
+ * scaling of the shell's monitor changes. This is only safe to call as long as
+ * no shell has been created for this display. When changing the value after a
+ * shell has been created for this display, the effect is undefined.
+ * <p>
+ * <b>Note:</b> This functionality is only available on Windows. Calling this
+ * method on other operating system will have no effect.
+ *
+ * @param activate whether rescaling shall be activated or deactivated
+ * @return whether activating or deactivating the rescaling was successful
+ * @since 3.127
+ * @deprecated this method should not be used as it needs to be called already
+ *             during instantiation to take proper effect
+ */
+@Deprecated(since = "2025-03", forRemoval = true)
+public boolean setRescalingAtRuntime(boolean activate) {
+	return setMonitorSpecificScaling(activate);
+}
+
+private boolean setMonitorSpecificScaling(boolean activate) {
+	int desiredApiAwareness = activate ? OS.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 : OS.DPI_AWARENESS_CONTEXT_SYSTEM_AWARE;
+	if (setDPIAwareness(desiredApiAwareness)) {
+		rescalingAtRuntime = activate;
+		coordinateSystemMapper = activate ? new MultiZoomCoordinateSystemMapper(this, this::getMonitors) : new SingleZoomCoordinateSystemMapper(this);
+		// dispose a existing font registry for the default display
+		SWTFontProvider.disposeFontRegistry(this);
+		return true;
+	}
+	return false;
+}
+
+private boolean setDPIAwareness(int desiredDpiAwareness) {
+	if (desiredDpiAwareness == OS.GetThreadDpiAwarenessContext()) {
+		return true;
+	}
+	if (desiredDpiAwareness == OS.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) {
+		// "Per Monitor V2" only available in more recent Windows version
+		boolean perMonitorV2Available = OsVersion.IS_WIN10_1809;
+		if (!perMonitorV2Available) {
+			System.err.println("***WARNING: the OS version does not support DPI awareness mode PerMonitorV2.");
+			return false;
+		}
+	}
+	long setDpiAwarenessResult = OS.SetThreadDpiAwarenessContext(desiredDpiAwareness);
+	if (setDpiAwarenessResult == 0L) {
+		System.err.println("***WARNING: setting DPI awareness failed.");
+		return false;
+	}
+	return true;
+}
+
+private void runWithProperDPIAwareness(Runnable operation) {
+	if (isRescalingAtRuntime()) {
+		// refreshing is only necessary, when monitor specific scaling is active
+		long previousDPIAwareness = OS.GetThreadDpiAwarenessContext();
+		if (!setDPIAwareness(OS.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) {
+			// awareness was not changed, so no need to reset it
+			previousDPIAwareness = 0;
+		}
+		operation.run();
+		if (previousDPIAwareness > 0) {
+			OS.SetThreadDpiAwarenessContext(previousDPIAwareness);
+		}
+	} else {
+		operation.run();
+	}
 }
 }

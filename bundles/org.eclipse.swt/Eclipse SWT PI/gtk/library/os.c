@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2024 IBM Corporation and others. All rights reserved.
+ * Copyright (c) 2000, 2025 IBM Corporation and others. All rights reserved.
  * The contents of this file are made available under the terms
  * of the GNU Lesser General Public License (LGPL) Version 2.1 that
  * accompanies this distribution (lgpl-v21.txt).  The LGPL is also
@@ -3491,6 +3491,18 @@ JNIEXPORT jlong JNICALL GTK_NATIVE(GTK_1TYPE_1CELL_1RENDERER_1TOGGLE)
 }
 #endif
 
+#ifndef NO_GTK_1TYPE_1FILE_1FILTER
+JNIEXPORT jlong JNICALL GTK_NATIVE(GTK_1TYPE_1FILE_1FILTER)
+	(JNIEnv *env, jclass that)
+{
+	jlong rc = 0;
+	GTK_NATIVE_ENTER(env, that, GTK_1TYPE_1FILE_1FILTER_FUNC);
+	rc = (jlong)GTK_TYPE_FILE_FILTER;
+	GTK_NATIVE_EXIT(env, that, GTK_1TYPE_1FILE_1FILTER_FUNC);
+	return rc;
+}
+#endif
+
 #ifndef NO_GTK_1TYPE_1IM_1MULTICONTEXT
 JNIEXPORT jlong JNICALL GTK_NATIVE(GTK_1TYPE_1IM_1MULTICONTEXT)
 	(JNIEnv *env, jclass that)
@@ -5105,18 +5117,6 @@ fail:
 }
 #endif
 
-#ifndef NO_gtk_1gesture_1drag_1new
-JNIEXPORT jlong JNICALL GTK_NATIVE(gtk_1gesture_1drag_1new)
-	(JNIEnv *env, jclass that, jlong arg0)
-{
-	jlong rc = 0;
-	GTK_NATIVE_ENTER(env, that, gtk_1gesture_1drag_1new_FUNC);
-	rc = (jlong)gtk_gesture_drag_new((GtkWidget *)arg0);
-	GTK_NATIVE_EXIT(env, that, gtk_1gesture_1drag_1new_FUNC);
-	return rc;
-}
-#endif
-
 #ifndef NO_gtk_1gesture_1get_1last_1updated_1sequence
 JNIEXPORT jlong JNICALL GTK_NATIVE(gtk_1gesture_1get_1last_1updated_1sequence)
 	(JNIEnv *env, jclass that, jlong arg0)
@@ -5172,18 +5172,6 @@ JNIEXPORT jdouble JNICALL GTK_NATIVE(gtk_1gesture_1rotate_1get_1angle_1delta)
 }
 #endif
 
-#ifndef NO_gtk_1gesture_1rotate_1new
-JNIEXPORT jlong JNICALL GTK_NATIVE(gtk_1gesture_1rotate_1new)
-	(JNIEnv *env, jclass that, jlong arg0)
-{
-	jlong rc = 0;
-	GTK_NATIVE_ENTER(env, that, gtk_1gesture_1rotate_1new_FUNC);
-	rc = (jlong)gtk_gesture_rotate_new((GtkWidget *)arg0);
-	GTK_NATIVE_EXIT(env, that, gtk_1gesture_1rotate_1new_FUNC);
-	return rc;
-}
-#endif
-
 #ifndef NO_gtk_1gesture_1single_1get_1current_1button
 JNIEXPORT jint JNICALL GTK_NATIVE(gtk_1gesture_1single_1get_1current_1button)
 	(JNIEnv *env, jclass that, jlong arg0)
@@ -5233,18 +5221,6 @@ JNIEXPORT jdouble JNICALL GTK_NATIVE(gtk_1gesture_1zoom_1get_1scale_1delta)
 	GTK_NATIVE_ENTER(env, that, gtk_1gesture_1zoom_1get_1scale_1delta_FUNC);
 	rc = (jdouble)gtk_gesture_zoom_get_scale_delta((GtkGestureZoom *)arg0);
 	GTK_NATIVE_EXIT(env, that, gtk_1gesture_1zoom_1get_1scale_1delta_FUNC);
-	return rc;
-}
-#endif
-
-#ifndef NO_gtk_1gesture_1zoom_1new
-JNIEXPORT jlong JNICALL GTK_NATIVE(gtk_1gesture_1zoom_1new)
-	(JNIEnv *env, jclass that, jlong arg0)
-{
-	jlong rc = 0;
-	GTK_NATIVE_ENTER(env, that, gtk_1gesture_1zoom_1new_FUNC);
-	rc = (jlong)gtk_gesture_zoom_new((GtkWidget *)arg0);
-	GTK_NATIVE_EXIT(env, that, gtk_1gesture_1zoom_1new_FUNC);
 	return rc;
 }
 #endif
@@ -9522,16 +9498,6 @@ JNIEXPORT jboolean JNICALL GTK_NATIVE(gtk_1widget_1has_1focus)
 }
 #endif
 
-#ifndef NO_gtk_1widget_1hide
-JNIEXPORT void JNICALL GTK_NATIVE(gtk_1widget_1hide)
-	(JNIEnv *env, jclass that, jlong arg0)
-{
-	GTK_NATIVE_ENTER(env, that, gtk_1widget_1hide_FUNC);
-	gtk_widget_hide((GtkWidget *)arg0);
-	GTK_NATIVE_EXIT(env, that, gtk_1widget_1hide_FUNC);
-}
-#endif
-
 #ifndef NO_gtk_1widget_1insert_1action_1group
 JNIEXPORT void JNICALL GTK_NATIVE(gtk_1widget_1insert_1action_1group)
 	(JNIEnv *env, jclass that, jlong arg0, jbyteArray arg1, jlong arg2)
@@ -9847,16 +9813,6 @@ JNIEXPORT void JNICALL GTK_NATIVE(gtk_1widget_1set_1visible)
 	GTK_NATIVE_ENTER(env, that, gtk_1widget_1set_1visible_FUNC);
 	gtk_widget_set_visible((GtkWidget *)arg0, (gboolean)arg1);
 	GTK_NATIVE_EXIT(env, that, gtk_1widget_1set_1visible_FUNC);
-}
-#endif
-
-#ifndef NO_gtk_1widget_1show
-JNIEXPORT void JNICALL GTK_NATIVE(gtk_1widget_1show)
-	(JNIEnv *env, jclass that, jlong arg0)
-{
-	GTK_NATIVE_ENTER(env, that, gtk_1widget_1show_FUNC);
-	gtk_widget_show((GtkWidget *)arg0);
-	GTK_NATIVE_EXIT(env, that, gtk_1widget_1show_FUNC);
 }
 #endif
 
@@ -11736,6 +11692,28 @@ JNIEXPORT jlong JNICALL OS_NATIVE(g_1list_1previous)
 }
 #endif
 
+#ifndef NO_g_1list_1store_1append
+JNIEXPORT void JNICALL OS_NATIVE(g_1list_1store_1append)
+	(JNIEnv *env, jclass that, jlong arg0, jlong arg1)
+{
+	OS_NATIVE_ENTER(env, that, g_1list_1store_1append_FUNC);
+	g_list_store_append((GListStore *)arg0, (GObject *)arg1);
+	OS_NATIVE_EXIT(env, that, g_1list_1store_1append_FUNC);
+}
+#endif
+
+#ifndef NO_g_1list_1store_1new
+JNIEXPORT jlong JNICALL OS_NATIVE(g_1list_1store_1new)
+	(JNIEnv *env, jclass that, jlong arg0)
+{
+	jlong rc = 0;
+	OS_NATIVE_ENTER(env, that, g_1list_1store_1new_FUNC);
+	rc = (jlong)g_list_store_new((GType)arg0);
+	OS_NATIVE_EXIT(env, that, g_1list_1store_1new_FUNC);
+	return rc;
+}
+#endif
+
 #ifndef NO_g_1log_1default_1handler
 JNIEXPORT void JNICALL OS_NATIVE(g_1log_1default_1handler)
 	(JNIEnv *env, jclass that, jlong arg0, jint arg1, jlong arg2, jlong arg3)
@@ -12783,6 +12761,33 @@ JNIEXPORT void JNICALL OS_NATIVE(g_1unsetenv)
 fail:
 	if (arg0 && lparg0) (*env)->ReleaseByteArrayElements(env, arg0, lparg0, JNI_ABORT);
 	OS_NATIVE_EXIT(env, that, g_1unsetenv_FUNC);
+}
+#endif
+
+#ifndef NO_g_1uri_1parse
+JNIEXPORT jlong JNICALL OS_NATIVE(g_1uri_1parse)
+	(JNIEnv *env, jclass that, jbyteArray arg0, jlong arg1, jlongArray arg2)
+{
+	jbyte *lparg0=NULL;
+	jlong *lparg2=NULL;
+	jlong rc = 0;
+	OS_NATIVE_ENTER(env, that, g_1uri_1parse_FUNC);
+	if (arg0) if ((lparg0 = (*env)->GetByteArrayElements(env, arg0, NULL)) == NULL) goto fail;
+	if (arg2) if ((lparg2 = (*env)->GetLongArrayElements(env, arg2, NULL)) == NULL) goto fail;
+/*
+	rc = (jlong)g_uri_parse((const gchar *)lparg0, arg1, (GError **)lparg2);
+*/
+	{
+		OS_LOAD_FUNCTION(fp, g_uri_parse)
+		if (fp) {
+			rc = (jlong)((jlong (CALLING_CONVENTION*)(const gchar *, jlong, GError **))fp)((const gchar *)lparg0, arg1, (GError **)lparg2);
+		}
+	}
+fail:
+	if (arg2 && lparg2) (*env)->ReleaseLongArrayElements(env, arg2, lparg2, 0);
+	if (arg0 && lparg0) (*env)->ReleaseByteArrayElements(env, arg0, lparg0, 0);
+	OS_NATIVE_EXIT(env, that, g_1uri_1parse_FUNC);
+	return rc;
 }
 #endif
 

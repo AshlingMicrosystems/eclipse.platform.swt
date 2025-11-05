@@ -14,6 +14,10 @@
 package org.eclipse.swt.graphics;
 
 
+import java.util.*;
+import java.util.function.*;
+import java.util.stream.*;
+
 import org.eclipse.swt.*;
 import org.eclipse.swt.internal.*;
 import org.eclipse.swt.internal.win32.*;
@@ -33,19 +37,11 @@ import org.eclipse.swt.internal.win32.*;
  */
 public final class Region extends Resource {
 
-	/**
-	 * the OS resource for the region
-	 * (Warning: This field is platform dependent)
-	 * <p>
-	 * <b>IMPORTANT:</b> This field is <em>not</em> part of the SWT
-	 * public API. It is marked public only so that it can be shared
-	 * within the packages provided by SWT. It is not available on all
-	 * platforms and should never be accessed from application code.
-	 * </p>
-	 *
-	 * @noreference This field is not intended to be referenced by clients.
-	 */
-	public long handle;
+	private Map<Integer, RegionHandle> zoomToHandle = new HashMap<>();
+
+	private List<Operation> operations = new ArrayList<>();
+
+	private boolean isDestroyed;
 
 /**
  * Constructs a new empty region.
@@ -84,20 +80,8 @@ public Region () {
  */
 public Region (Device device) {
 	super(device);
-	handle = OS.CreateRectRgn (0, 0, 0, 0);
-	if (handle == 0) SWT.error(SWT.ERROR_NO_HANDLES);
 	init();
-}
-
-/**
- * Constructs a new region given a handle to the operating
- * system resources that it should represent.
- *
- * @param handle the handle for the result
- */
-Region(Device device, int handle) {
-	super(device);
-	this.handle = handle;
+	this.device.registerResourceWithZoomSupport(this);
 }
 
 /**
@@ -118,13 +102,8 @@ Region(Device device, int handle) {
 public void add (int[] pointArray) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
 	if (pointArray == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
-	addInPixels(DPIUtil.autoScaleUp(pointArray));
-}
-
-void addInPixels (int[] pointArray) {
-	long polyRgn = OS.CreatePolygonRgn(pointArray, pointArray.length / 2, OS.ALTERNATE);
-	OS.CombineRgn (handle, handle, polyRgn, OS.RGN_OR);
-	OS.DeleteObject (polyRgn);
+	final Operation operation = new OperationWithArray(Operation::add, Arrays.copyOf(pointArray, pointArray.length));
+	storeAndApplyOperationForAllHandles(operation);
 }
 
 /**
@@ -144,8 +123,8 @@ void addInPixels (int[] pointArray) {
 public void add (Rectangle rect) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
 	if (rect == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
-	rect = DPIUtil.autoScaleUp(rect);
-	addInPixels(rect.x, rect.y, rect.width, rect.height);
+	final Operation operation = new OperationWithRectangle(Operation::add, new Rectangle(rect.x, rect.y, rect.width, rect.height));
+	storeAndApplyOperationForAllHandles(operation);
 }
 
 /**
@@ -168,14 +147,8 @@ public void add (Rectangle rect) {
  */
 public void add (int x, int y, int width, int height) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
-	addInPixels(DPIUtil.autoScaleUp(x), DPIUtil.autoScaleUp(y), DPIUtil.autoScaleUp(width), DPIUtil.autoScaleUp(height));
-}
-
-void addInPixels (int x, int y, int width, int height) {
-	if (width < 0 || height < 0) SWT.error(SWT.ERROR_INVALID_ARGUMENT);
-	long rectRgn = OS.CreateRectRgn (x, y, x + width, y + height);
-	OS.CombineRgn (handle, handle, rectRgn, OS.RGN_OR);
-	OS.DeleteObject (rectRgn);
+	final Operation operation = new OperationWithRectangle(Operation::add, new Rectangle(x, y, width, height));
+	storeAndApplyOperationForAllHandles(operation);
 }
 
 /**
@@ -197,7 +170,10 @@ public void add (Region region) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
 	if (region == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
 	if (region.isDisposed()) SWT.error(SWT.ERROR_INVALID_ARGUMENT);
-	OS.CombineRgn (handle, handle, region.handle, OS.RGN_OR);
+	if (!region.operations.isEmpty()) {
+		final Operation operation = new OperationWithRegion(Operation::add, region.operations);
+		storeAndApplyOperationForAllHandles(operation);
+	}
 }
 
 /**
@@ -215,10 +191,15 @@ public void add (Region region) {
  */
 public boolean contains (int x, int y) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
-	return containsInPixels(DPIUtil.autoScaleUp(x), DPIUtil.autoScaleUp(y));
+	return applyUsingAnyHandle(regionHandle -> {
+		int zoom = regionHandle.zoom();
+		int xInPixels = DPIUtil.scaleUp(x, zoom);
+		int yInPixels = DPIUtil.scaleUp(y, zoom);
+		return containsInPixels(regionHandle.handle(), xInPixels, yInPixels);
+	});
 }
 
-boolean containsInPixels (int x, int y) {
+boolean containsInPixels (long handle, int x, int y) {
 	return OS.PtInRegion (handle, x, y);
 }
 
@@ -240,14 +221,32 @@ boolean containsInPixels (int x, int y) {
 public boolean contains (Point pt) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
 	if (pt == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
-	pt = DPIUtil.autoScaleUp(pt);
-	return containsInPixels(pt.x, pt.y);
+	return applyUsingAnyHandle(regionHandle -> {
+		int zoom = regionHandle.zoom();
+		Point p = DPIUtil.scaleUp(pt, zoom);
+		return containsInPixels(regionHandle.handle(), p.x, p.y);
+	});
 }
 
 @Override
 void destroy () {
-	OS.DeleteObject(handle);
-	handle = 0;
+	device.deregisterResourceWithZoomSupport(this);
+	zoomToHandle.values().forEach(RegionHandle::destroy);
+	zoomToHandle.clear();
+	operations.clear();
+	this.isDestroyed = true;
+}
+
+@Override
+void destroyHandlesExcept(Set<Integer> zoomLevels) {
+	zoomToHandle.entrySet().removeIf(entry -> {
+		final Integer zoom = entry.getKey();
+		if (!zoomLevels.contains(zoom)) {
+			entry.getValue().destroy();
+			return true;
+		}
+		return false;
+	});
 }
 
 /**
@@ -262,10 +261,7 @@ void destroy () {
  */
 @Override
 public boolean equals (Object object) {
-	if (this == object) return true;
-	if (!(object instanceof Region)) return false;
-	Region rgn = (Region)object;
-	return handle == rgn.handle;
+	return super.equals(object);
 }
 
 /**
@@ -283,10 +279,12 @@ public boolean equals (Object object) {
  */
 public Rectangle getBounds () {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
-	return DPIUtil.autoScaleDown(getBoundsInPixels());
+	return applyUsingAnyHandle(regionHandle -> {
+		return DPIUtil.scaleDown(getBoundsInPixels(regionHandle.handle()), regionHandle.zoom());
+	});
 }
 
-Rectangle getBoundsInPixels() {
+private Rectangle getBoundsInPixels(long handle) {
 	RECT rect = new RECT();
 	OS.GetRgnBox(handle, rect);
 	return new Rectangle(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
@@ -304,9 +302,8 @@ Rectangle getBoundsInPixels() {
  */
 @Override
 public int hashCode () {
-	return (int)handle;
+	return super.hashCode();
 }
-
 /**
  * Intersects the given rectangle to the collection of polygons
  * the receiver maintains to describe its area.
@@ -326,8 +323,8 @@ public int hashCode () {
 public void intersect (Rectangle rect) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
 	if (rect == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
-	rect = DPIUtil.autoScaleUp(rect);
-	intersectInPixels(rect.x, rect.y, rect.width, rect.height);
+	final Operation operation = new OperationWithRectangle(Operation::intersect, new Rectangle(rect.x, rect.y, rect.width, rect.height));
+	storeAndApplyOperationForAllHandles(operation);
 }
 
 /**
@@ -350,14 +347,8 @@ public void intersect (Rectangle rect) {
  */
 public void intersect (int x, int y, int width, int height) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
-	intersectInPixels(DPIUtil.autoScaleUp(x), DPIUtil.autoScaleUp(y), DPIUtil.autoScaleUp(width), DPIUtil.autoScaleUp(height));
-}
-
-void intersectInPixels (int x, int y, int width, int height) {
-	if (width < 0 || height < 0) SWT.error(SWT.ERROR_INVALID_ARGUMENT);
-	long rectRgn = OS.CreateRectRgn (x, y, x + width, y + height);
-	OS.CombineRgn (handle, handle, rectRgn, OS.RGN_AND);
-	OS.DeleteObject (rectRgn);
+	final Operation operation = new OperationWithRectangle(Operation::intersect, new Rectangle(x, y, width, height));
+	storeAndApplyOperationForAllHandles(operation);
 }
 
 /**
@@ -381,7 +372,10 @@ public void intersect (Region region) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
 	if (region == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
 	if (region.isDisposed()) SWT.error(SWT.ERROR_INVALID_ARGUMENT);
-	OS.CombineRgn (handle, handle, region.handle, OS.RGN_AND);
+	if (!region.operations.isEmpty()) {
+		final Operation operation = new OperationWithRegion(Operation::intersect, region.operations);
+		storeAndApplyOperationForAllHandles(operation);
+	}
 }
 
 /**
@@ -403,13 +397,13 @@ public void intersect (Region region) {
  */
 public boolean intersects (int x, int y, int width, int height) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
-	return 	intersectsInPixels(DPIUtil.autoScaleUp(x), DPIUtil.autoScaleUp(y), DPIUtil.autoScaleUp(width), DPIUtil.autoScaleUp(height));
+	return intersects(new Rectangle(x, y, width, height));
 }
 
-boolean intersectsInPixels (int x, int y, int width, int height) {
+boolean intersectsInPixels (long handle, int x, int y, int width, int height) {
 	RECT r = new RECT ();
 	OS.SetRect (r, x, y, x + width, y + height);
-	return OS.RectInRegion (handle, r);
+	return OS.RectInRegion(handle, r);
 }
 
 /**
@@ -432,8 +426,10 @@ boolean intersectsInPixels (int x, int y, int width, int height) {
 public boolean intersects (Rectangle rect) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
 	if (rect == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
-	rect = DPIUtil.autoScaleUp(rect);
-	return intersectsInPixels(rect.x, rect.y, rect.width, rect.height);
+	return applyUsingAnyHandle(regionHandle -> {
+		Rectangle r = DPIUtil.scaleUp(rect, regionHandle.zoom());
+		return intersectsInPixels(regionHandle.handle(), r.x, r.y, r.width, r.height);
+	});
 }
 
 /**
@@ -448,7 +444,7 @@ public boolean intersects (Rectangle rect) {
  */
 @Override
 public boolean isDisposed() {
-	return handle == 0;
+	return isDestroyed;
 }
 
 /**
@@ -465,9 +461,11 @@ public boolean isDisposed() {
 public boolean isEmpty () {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
 	RECT rect = new RECT ();
-	int result = OS.GetRgnBox (handle, rect);
-	if (result == OS.NULLREGION) return true;
-	return ((rect.right - rect.left) <= 0) || ((rect.bottom - rect.top) <= 0);
+	return applyUsingAnyHandle(regionHandle -> {
+		int result = OS.GetRgnBox(regionHandle.handle(), rect);
+		if (result == OS.NULLREGION) return true;
+		return ((rect.right - rect.left) <= 0) || ((rect.bottom - rect.top) <= 0);
+	});
 }
 
 /**
@@ -488,13 +486,8 @@ public boolean isEmpty () {
 public void subtract (int[] pointArray) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
 	if (pointArray == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
-	subtractInPixels(DPIUtil.autoScaleUp(pointArray));
-}
-
-void subtractInPixels (int[] pointArray) {
-	long polyRgn = OS.CreatePolygonRgn(pointArray, pointArray.length / 2, OS.ALTERNATE);
-	OS.CombineRgn (handle, handle, polyRgn, OS.RGN_DIFF);
-	OS.DeleteObject (polyRgn);
+	final Operation operation = new OperationWithArray(Operation::subtract, Arrays.copyOf(pointArray, pointArray.length));
+	storeAndApplyOperationForAllHandles(operation);
 }
 
 /**
@@ -516,8 +509,8 @@ void subtractInPixels (int[] pointArray) {
 public void subtract (Rectangle rect) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
 	if (rect == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
-	rect = DPIUtil.autoScaleUp(rect);
-	subtractInPixels(rect.x, rect.y, rect.width, rect.height);
+	final Operation operation = new OperationWithRectangle(Operation::subtract, new Rectangle(rect.x, rect.y, rect.width, rect.height));
+	storeAndApplyOperationForAllHandles(operation);
 }
 
 /**
@@ -540,14 +533,8 @@ public void subtract (Rectangle rect) {
  */
 public void subtract (int x, int y, int width, int height) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
-	subtractInPixels(DPIUtil.autoScaleUp(x), DPIUtil.autoScaleUp(y), DPIUtil.autoScaleUp(width), DPIUtil.autoScaleUp(height));
-}
-
-void subtractInPixels (int x, int y, int width, int height) {
-	if (width < 0 || height < 0) SWT.error(SWT.ERROR_INVALID_ARGUMENT);
-	long rectRgn = OS.CreateRectRgn (x, y, x + width, y + height);
-	OS.CombineRgn (handle, handle, rectRgn, OS.RGN_DIFF);
-	OS.DeleteObject (rectRgn);
+	final Operation operation = new OperationWithRectangle(Operation::subtract, new Rectangle(x, y, width, height));
+	storeAndApplyOperationForAllHandles(operation);
 }
 
 /**
@@ -571,7 +558,10 @@ public void subtract (Region region) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
 	if (region == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
 	if (region.isDisposed()) SWT.error(SWT.ERROR_INVALID_ARGUMENT);
-	OS.CombineRgn (handle, handle, region.handle, OS.RGN_DIFF);
+	if (!region.operations.isEmpty()) {
+		final Operation operation = new OperationWithRegion(Operation::subtract, region.operations);
+		storeAndApplyOperationForAllHandles(operation);
+	}
 }
 
 /**
@@ -589,11 +579,8 @@ public void subtract (Region region) {
  */
 public void translate (int x, int y) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
-	translateInPixels(DPIUtil.autoScaleUp(x), DPIUtil.autoScaleUp(y));
-}
-
-void translateInPixels (int x, int y) {
-	OS.OffsetRgn (handle, x, y);
+	final Operation operation = new OperationWithPoint(Operation::translate, new Point(x, y));
+	storeAndApplyOperationForAllHandles(operation);
 }
 
 /**
@@ -614,8 +601,68 @@ void translateInPixels (int x, int y) {
 public void translate (Point pt) {
 	if (isDisposed()) SWT.error(SWT.ERROR_GRAPHIC_DISPOSED);
 	if (pt == null) SWT.error(SWT.ERROR_NULL_ARGUMENT);
-	pt = DPIUtil.autoScaleUp(pt);
-	translateInPixels(pt.x, pt.y);
+	final Operation operation = new OperationWithPoint(Operation::translate, new Point(pt.x, pt.y));
+	storeAndApplyOperationForAllHandles(operation);
+}
+
+private void storeAndApplyOperationForAllHandles(Operation operation) {
+	operations.add(operation);
+	zoomToHandle.forEach((zoom, handle) -> operation.apply(handle));
+}
+
+private <T> T applyUsingAnyHandle(Function<RegionHandle, T> function) {
+	if (zoomToHandle.isEmpty()) {
+		return applyUsingTemporaryHandle(device.getDeviceZoom(), operations, function);
+	}
+	return function.apply(zoomToHandle.values().iterator().next());
+}
+
+private static <T> T applyUsingTemporaryHandle(int zoom, List<Operation> operations, Function<RegionHandle, T> function) {
+	RegionHandle temporaryHandle = newRegionHandle(zoom, operations);
+	try {
+		return function.apply(temporaryHandle);
+	} finally {
+		temporaryHandle.destroy();
+	}
+}
+
+private static RegionHandle newRegionHandle(int zoom, List<Operation> operations) {
+	long newHandle = OS.CreateRectRgn (0, 0, 0, 0);
+	if (newHandle == 0) SWT.error(SWT.ERROR_NO_HANDLES);
+	RegionHandle newRegionHandle = new RegionHandle(newHandle, zoom);
+	for (Operation operation : operations) {
+		operation.apply(newRegionHandle);
+	}
+	return newRegionHandle;
+}
+
+private RegionHandle getRegionHandle(int zoom) {
+	if (!zoomToHandle.containsKey(zoom)) {
+		RegionHandle regionHandle = newRegionHandle(zoom, operations);
+		zoomToHandle.put(zoom, regionHandle);
+	}
+	return zoomToHandle.get(zoom);
+}
+
+/**
+ * <b>IMPORTANT:</b> This method is not part of the public
+ * API for Image. It is marked public only so that it
+ * can be shared within the packages provided by SWT. It is not
+ * available on all platforms, and should never be called from
+ * application code.
+ *
+ * Gets the handle for the region scaled at required zoom level
+ *
+ * @param region the region to be scaled
+ *
+ * @param zoom the zoom level for which the region is needed
+ *
+ * @return the handle of the region scaled for the zoom level
+ *
+ * @noreference This method is not intended to be referenced by clients.
+ */
+public static long win32_getHandle(Region region, int zoom) {
+	return region.getRegionHandle(zoom).handle();
 }
 
 /**
@@ -627,27 +674,208 @@ public void translate (Point pt) {
 @Override
 public String toString () {
 	if (isDisposed()) return "Region {*DISPOSED*}";
-	return "Region {" + handle + "}";
+	return "Region {" + zoomToHandle.entrySet().stream().map(entry -> entry.getValue() + "(zoom:" + entry.getKey() + ")").collect(Collectors.joining(","));
 }
 
-/**
- * Invokes platform specific functionality to allocate a new region.
- * <p>
- * <b>IMPORTANT:</b> This method is <em>not</em> part of the public
- * API for <code>Region</code>. It is marked public only so that it
- * can be shared within the packages provided by SWT. It is not
- * available on all platforms, and should never be called from
- * application code.
- * </p>
- *
- * @param device the device on which to allocate the region
- * @param handle the handle for the region
- * @return a new region object containing the specified device and handle
- *
- * @noreference This method is not intended to be referenced by clients.
- */
-public static Region win32_new(Device device, int handle) {
-	return new Region(device, handle);
+private record RegionHandle(long handle, int zoom) {
+	void destroy() {
+		OS.DeleteObject(handle());
+	}
 }
 
+@FunctionalInterface
+private interface OperationStrategy {
+	void apply(Operation operation, long handle, int zoom);
+}
+
+private abstract static class Operation {
+	private final OperationStrategy operationStrategy;
+
+	Operation(OperationStrategy operationStrategy) {
+		this.operationStrategy = operationStrategy;
+	}
+
+	void apply(RegionHandle regionHandle) {
+		operationStrategy.apply(this, regionHandle.handle(), regionHandle.zoom());
+	}
+
+	abstract void add(long handle, int zoom);
+
+	abstract void subtract(long handle, int zoom);
+
+	abstract void intersect(long handle, int zoom);
+
+	abstract void translate(long handle, int zoom);
+}
+
+private static class OperationWithRectangle extends Operation {
+	private final Rectangle data;
+
+	OperationWithRectangle(OperationStrategy operationStrategy, Rectangle data) {
+		super(operationStrategy);
+		this.data = data;
+	}
+
+	@Override
+	void add(long handle, int zoom) {
+		Rectangle bounds = getScaledRectangle(zoom);
+		addInPixels(handle, bounds.x, bounds.y, bounds.width, bounds.height);
+	}
+
+	@Override
+	void subtract(long handle, int zoom) {
+		Rectangle bounds = getScaledRectangle(zoom);
+		subtractInPixels(handle, bounds.x, bounds.y, bounds.width, bounds.height);
+	}
+
+	@Override
+	void intersect(long handle, int zoom) {
+		Rectangle bounds = getScaledRectangle(zoom);
+		intersectInPixels(handle, bounds.x, bounds.y, bounds.width, bounds.height);
+	}
+
+	@Override
+	void translate(long handle, int zoom) {
+		throw new UnsupportedOperationException();
+	}
+
+	private void addInPixels (long handle, int x, int y, int width, int height) {
+		if (width < 0 || height < 0) SWT.error(SWT.ERROR_INVALID_ARGUMENT);
+		long rectRgn = OS.CreateRectRgn (x, y, x + width, y + height);
+		OS.CombineRgn (handle, handle, rectRgn, OS.RGN_OR);
+		OS.DeleteObject (rectRgn);
+	}
+
+	private void subtractInPixels (long handle, int x, int y, int width, int height) {
+		if (width < 0 || height < 0) SWT.error(SWT.ERROR_INVALID_ARGUMENT);
+		long rectRgn = OS.CreateRectRgn (x, y, x + width, y + height);
+		OS.CombineRgn (handle, handle, rectRgn, OS.RGN_DIFF);
+		OS.DeleteObject (rectRgn);
+	}
+
+	private void intersectInPixels (long handle, int x, int y, int width, int height) {
+		if (width < 0 || height < 0) SWT.error(SWT.ERROR_INVALID_ARGUMENT);
+		long rectRgn = OS.CreateRectRgn (x, y, x + width, y + height);
+		OS.CombineRgn (handle, handle, rectRgn, OS.RGN_AND);
+		OS.DeleteObject (rectRgn);
+	}
+
+	private Rectangle getScaledRectangle(int zoom) {
+		return DPIUtil.scaleUp(data, zoom);
+	}
+
+}
+
+private static class OperationWithArray extends Operation {
+	private final int[] data;
+
+	public OperationWithArray(OperationStrategy operationStrategy, int[] data) {
+		super(operationStrategy);
+		this.data = data;
+	}
+
+	@Override
+	void add(long handle, int zoom) {
+		int[] points = getScaledPoints(zoom);
+		addInPixels(handle, points);
+	}
+
+	@Override
+	void subtract(long handle, int zoom) {
+		int[] pointArray = getScaledPoints(zoom);
+		subtractInPixels(handle, pointArray);
+	}
+
+	@Override
+	void intersect(long handle, int zoom) {
+		throw new UnsupportedOperationException();
+	}
+
+	@Override
+	void translate(long handle, int zoom) {
+		throw new UnsupportedOperationException();
+	}
+
+	private void addInPixels (long handle, int[] pointArray) {
+		long polyRgn = OS.CreatePolygonRgn(pointArray, pointArray.length / 2, OS.ALTERNATE);
+		OS.CombineRgn (handle, handle, polyRgn, OS.RGN_OR);
+		OS.DeleteObject (polyRgn);
+	}
+
+	private void subtractInPixels (long handle, int[] pointArray) {
+		long polyRgn = OS.CreatePolygonRgn(pointArray, pointArray.length / 2, OS.ALTERNATE);
+		OS.CombineRgn (handle, handle, polyRgn, OS.RGN_DIFF);
+		OS.DeleteObject (polyRgn);
+	}
+
+	private int[] getScaledPoints(int zoom) {
+		return DPIUtil.scaleUp(data, zoom);
+	}
+}
+
+private static class OperationWithPoint extends Operation {
+	private final Point data;
+
+	public OperationWithPoint(OperationStrategy operationStrategy, Point data) {
+		super(operationStrategy);
+		this.data = data;
+	}
+
+	@Override
+	void add(long handle, int zoom) {
+		throw new UnsupportedOperationException();
+	}
+
+	@Override
+	void subtract(long handle, int zoom) {
+		throw new UnsupportedOperationException();
+	}
+
+	@Override
+	void intersect(long handle, int zoom) {
+		throw new UnsupportedOperationException();
+	}
+
+	@Override
+	void translate(long handle, int zoom) {
+		Point pt = DPIUtil.scaleUp((Point) data, zoom);
+		OS.OffsetRgn (handle, pt.x, pt.y);
+	}
+
+}
+
+private static class OperationWithRegion extends Operation {
+	private final List<Operation> operations;
+
+	OperationWithRegion(OperationStrategy operationStrategy, List<Operation> operations) {
+		super(operationStrategy);
+		this.operations = List.copyOf(operations);
+	}
+
+	@Override
+	void add(long handle, int zoom) {
+		applyUsingTemporaryHandle(zoom, operations, regionHandle -> {
+			return OS.CombineRgn (handle, handle, regionHandle.handle(), OS.RGN_OR);
+		});
+	}
+
+	@Override
+	void subtract(long handle, int zoom) {
+		applyUsingTemporaryHandle(zoom, operations, regionHandle -> {
+			return OS.CombineRgn (handle, handle, regionHandle.handle(), OS.RGN_DIFF);
+		});
+	}
+
+	@Override
+	void intersect(long handle, int zoom) {
+		applyUsingTemporaryHandle(zoom, operations, regionHandle -> {
+			return OS.CombineRgn (handle, handle, regionHandle.handle(), OS.RGN_AND);
+		});
+	}
+
+	@Override
+	void translate(long handle, int zoom) {
+		throw new UnsupportedOperationException();
+	}
+}
 }
